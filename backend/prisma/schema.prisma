@@ -1,0 +1,234 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  sede
+  tesoureiro_setor
+  tesoureiro_congregacao
+  coletor
+  membro
+}
+
+enum Payment {
+  dinheiro
+  pix
+  cartao
+  outros
+}
+
+enum ClosureScope {
+  congregacao
+  setor
+}
+
+enum ClosureStatus {
+  closed
+  validated
+}
+
+enum PrestacaoStatus {
+  open
+  submitted
+  approved
+  rejected
+}
+
+model User {
+  id                 Int           @id @default(autoincrement())
+  email              String        @unique
+  passwordHash       String
+  name               String
+  role               Role
+  phone              String?
+  cpf                String?       @unique
+  cep                String?
+  memberCode         String?       @unique
+  profileCompletedAt DateTime?
+  sectorId           Int?
+  congregationId     Int?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  sector       Sector?       @relation(fields: [sectorId], references: [id])
+  congregation Congregation? @relation(fields: [congregationId], references: [id])
+  receipts     Receipt[]
+  expenses     Expense[]
+
+  @@index([sectorId])
+  @@index([congregationId])
+}
+
+model Sector {
+  id            Int            @id @default(autoincrement())
+  name          String
+  congregations Congregation[]
+  users         User[]
+  receipts      Receipt[]
+  expenses      Expense[]
+  closures      WeekClosure[]
+  prestacoes    Prestacao[]
+  alerts        Alert[]
+}
+
+model Congregation {
+  id          Int       @id @default(autoincrement())
+  code        String
+  name        String
+  address     String?
+  sectorId    Int
+  sector      Sector    @relation(fields: [sectorId], references: [id])
+  users       User[]
+  receipts    Receipt[]
+  expenses    Expense[]
+
+  @@index([sectorId])
+}
+
+model Receipt {
+  id               String   @id @default(cuid())
+  number           String
+  personName       String
+  personMemberCode String?
+  type             String
+  value            Decimal  @db.Decimal(12, 2)
+  payment          Payment  @default(dinheiro)
+  status           String   @default("confirmado")
+  date             DateTime @default(now())
+  sectorId         Int
+  congregationId   Int
+  createdById      Int?
+  createdAt        DateTime @default(now())
+
+  sector       Sector       @relation(fields: [sectorId], references: [id])
+  congregation Congregation @relation(fields: [congregationId], references: [id])
+  createdBy    User?        @relation(fields: [createdById], references: [id])
+
+  @@index([sectorId, congregationId, date])
+  @@index([personMemberCode])
+  @@index([date])
+}
+
+model Expense {
+  id             String   @id @default(cuid())
+  date           DateTime
+  category       String
+  description    String?
+  value          Decimal  @db.Decimal(12, 2)
+  payment        Payment  @default(dinheiro)
+  sectorId       Int
+  congregationId Int
+  proofName      String?
+  proofType      String?
+  proofSize      Int?
+  proofData      String?  @db.Text
+  createdByName  String?
+  createdById    Int?
+  createdAt      DateTime @default(now())
+
+  sector       Sector       @relation(fields: [sectorId], references: [id])
+  congregation Congregation @relation(fields: [congregationId], references: [id])
+  createdBy    User?        @relation(fields: [createdById], references: [id])
+
+  @@index([sectorId, congregationId, date])
+  @@index([date])
+}
+
+model WeekClosure {
+  id             String        @id @default(cuid())
+  weekStart      DateTime
+  scope          ClosureScope
+  sectorId       Int
+  congregationId Int?
+  income         Decimal       @db.Decimal(12, 2)
+  expense        Decimal       @db.Decimal(12, 2)
+  balance        Decimal       @db.Decimal(12, 2)
+  ratio          Float
+  exceeded       Boolean       @default(false)
+  justification  String?
+  status         ClosureStatus @default(closed)
+  closedBy       String
+  closedAt       DateTime      @default(now())
+  validatedBy    String?
+  validatedAt    DateTime?
+
+  sector Sector @relation(fields: [sectorId], references: [id])
+
+  @@index([weekStart, sectorId])
+  @@index([weekStart, sectorId, congregationId])
+}
+
+model Prestacao {
+  id            String          @id @default(cuid())
+  sectorId      Int
+  weekStart     DateTime
+  status        PrestacaoStatus @default(open)
+  declaredCash  Decimal         @db.Decimal(12, 2) @default(0)
+  declaredPix   Decimal         @db.Decimal(12, 2) @default(0)
+  incomeBy      Json?
+  expenseBy     Json?
+  note          String?
+  repasseProof  Json?
+  pixProofs     Json?
+  submittedById Int?
+  submittedAt   DateTime?
+  reviewedBy    String?
+  reviewedAt    DateTime?
+  reviewNote    String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  sector Sector @relation(fields: [sectorId], references: [id])
+
+  @@unique([sectorId, weekStart])
+}
+
+model Alert {
+  id             String       @id @default(cuid())
+  type           String       @default("excedente_despesa")
+  weekStart      DateTime
+  scope          ClosureScope
+  sectorId       Int
+  congregationId Int?
+  income         Decimal      @db.Decimal(12, 2)
+  expense        Decimal      @db.Decimal(12, 2)
+  ratio          Float
+  limitPct       Float        @default(0.4)
+  justification  String?
+  read           Boolean      @default(false)
+  createdBy      String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  sector Sector @relation(fields: [sectorId], references: [id])
+
+  @@index([weekStart, sectorId])
+  @@index([read])
+}
+
+// Trilha de auditoria imutável (append-only): registra quem fez o quê, quando e sobre qual registro.
+// Não possui FK para User de propósito, para sobreviver a mudanças de cadastro.
+model AuditLog {
+  id             Int      @id @default(autoincrement())
+  at             DateTime @default(now())
+  actorId        Int?
+  actorName      String?
+  actorRole      Role?
+  action         String
+  entity         String
+  entityId       String?
+  sectorId       Int?
+  congregationId Int?
+  summary        String?
+  before         Json?
+  after          Json?
+
+  @@index([entity, entityId])
+  @@index([at])
+  @@index([sectorId])
+}
