@@ -147,26 +147,32 @@ mesma origem, cookie `SameSite=Strict`, sem CORS entre domínios e **sem nenhum 
 > Por que **não** usar o Postgres do Render: o banco grátis dele **expira em 30 dias** (mais 14 de
 > carência) e **apaga todos os dados**. O do Neon é permanente.
 
-### 6.1 Banco no Neon (grátis, sem cartão)
+#### Banco já provisionado (esta máquina)
 
-Provisionado com a CLI do Neon (feito nesta máquina; `neon` fica em `%APPDATA%\npm\neon.cmd` —
-o PowerShell bloqueia o `.ps1` por política de execução):
+`npm i -g neon@latest` + `neon login` + `neon init` + `neon deploy` foram executados aqui:
+projeto **`noisy-block-71166023`** ("recebimento", org `org-billowing-mouse-49680305`, região
+`aws-sa-east-1`, branch **`production`**). Vínculo em `.neon`, política em `neon.ts`, skill do
+agente em `.agents/skills/neon`.
+
+> `neon deploy` grava `.env.local` na raiz a cada execução — **cuidado**: ele reescreve as
+> variáveis do Neon e apaga customizações feitas ali. `neon env pull` faz o mesmo. O `backend/.env`
+> (que aponta para o Neon) é um arquivo separado e não é afetado.
+
+#### Criar do zero (nova máquina/conta)
 
 ```powershell
 npm i -g neon@latest
 neon login                       # abre o navegador (60 s para autorizar)
-neon init -y --org-id org-billowing-mouse-49680305 --project-id noisy-block-71166023 `
+neon init -y --org-id <org> --project-id <projeto> `
            --branch production --services postgres
 neon deploy                      # aplica a política e grava .env.local na raiz
 ```
 
-- Projeto `noisy-block-71166023` ("recebimento", branch `production`); vínculo em `.neon`,
-  política em `neon.ts`, skill do agente em `.agents/skills/neon`.
-- `.env.local` (**não vai para o Git**) traz `DATABASE_URL` (pooler), `DATABASE_URL_UNPOOLED`
-  (direta) e `NEON_BRANCH`.
-- `backend/.env` recebe as duas: `DATABASE_URL` = pooler (tráfego da aplicação, conforme a
-  skill do Neon) e `DIRECT_URL` = direta — o `schema.prisma` declara `directUrl = env("DIRECT_URL")`,
-  então `prisma migrate deploy` usa a conexão direta (necessário: migrações não passam por pgbouncer).
+O `.env.local` (**não vai para o Git**) traz `DATABASE_URL` (pooler), `DATABASE_URL_UNPOOLED`
+(direta) e `NEON_BRANCH`. O `backend/.env` recebe as duas renomeadas: `DATABASE_URL` = pooler
+(tráfego da aplicação, conforme a skill do Neon) e `DIRECT_URL` = direta — o `schema.prisma`
+declara `directUrl = env("DIRECT_URL")`, então `prisma migrate deploy` usa a conexão direta
+(obrigatório: migrações não passam pelo pgbouncer).
 
 ### 6.2 Serviço no Render (Blueprint)
 
