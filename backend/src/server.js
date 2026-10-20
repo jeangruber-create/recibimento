@@ -17,6 +17,7 @@ const closureRoutes = require('./routes/closures.routes');
 const prestacaoRoutes = require('./routes/prestacoes.routes');
 const alertRoutes = require('./routes/alerts.routes');
 const profileRoutes = require('./routes/profile.routes');
+const publicRoutes = require('./routes/public.routes');
 
 const app = express();
 
@@ -69,6 +70,7 @@ const loginLimiter = rateLimit({
 app.get('/health', (req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
 
 app.use('/api/auth/login', loginLimiter);
+app.use('/api/public', publicRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/sectors', sectorRoutes);

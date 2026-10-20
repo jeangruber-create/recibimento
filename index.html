@@ -263,6 +263,7 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
         </div>
         <button class="btn btn-primary btn-lg" id="btnLogin" style="margin-top:8px;">Entrar</button>
       </div>
+      <button class="btn btn-outline" id="btnGoRegister" style="margin-top:14px;">Sou membro — quero me cadastrar</button>
       <p style="text-align:center; color:var(--text-muted); font-size:13px; margin-top:16px; line-height:1.8;">
         <strong>Usuários de teste</strong> (senha: 123456)<br>
         <span style="color:var(--primary); font-weight:600;">admin@adm.org.br</span> — Tesouraria Sede (tudo)<br>
@@ -271,6 +272,77 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
         <span style="color:var(--success); font-weight:600;">coletor@adm.org.br</span> — Coletor (travado)<br>
         <span style="color:#8E24AA; font-weight:600;">membro@adm.org.br</span> — Membro (portal + QR)
       </p>
+    </div>
+  </section>
+
+  <!-- SCREEN: AUTOCADASTRO DO MEMBRO -->
+  <section class="screen" id="screenRegister" data-title="Cadastro de Membro">
+    <div style="flex:1; display:flex; flex-direction:column; justify-content:center; padding:20px;">
+      <div class="card card--wide" id="registerCard">
+        <h3 class="card-title">Cadastro de Membro</h3>
+        <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px; line-height:1.5;">
+          Preencha seus dados para receber o agradecimento pelo seu dízimo ou oferta. Estes dados alimentam todo o sistema.
+        </p>
+        <div class="form-group" style="margin-bottom:10px;">
+          <label class="form-label">Nome completo *</label>
+          <input type="text" class="form-input" id="regName" placeholder="Ex: João da Silva" autocomplete="name">
+        </div>
+        <div class="form-row" style="margin-bottom:10px;">
+          <div class="form-group" style="margin:0;">
+            <label class="form-label">CPF *</label>
+            <input type="text" class="form-input" id="regCpf" placeholder="000.000.000-00" inputmode="numeric" maxlength="14" oninput="maskCpf(this)">
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label">Celular / WhatsApp *</label>
+            <input type="text" class="form-input" id="regPhone" placeholder="(00) 00000-0000" inputmode="numeric" maxlength="15" oninput="maskPhoneInput(this)">
+          </div>
+        </div>
+        <div class="form-row" style="margin-bottom:10px;">
+          <div class="form-group" style="margin:0;">
+            <label class="form-label">CEP *</label>
+            <input type="text" class="form-input" id="regCep" placeholder="00000-000" inputmode="numeric" maxlength="9" oninput="maskCep(this)">
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label">Nº da residência *</label>
+            <input type="text" class="form-input" id="regNumber" placeholder="Ex: 123" maxlength="20">
+          </div>
+        </div>
+        <div class="form-row" style="margin-bottom:10px;">
+          <div class="form-group" style="margin:0;">
+            <label class="form-label">Setor</label>
+            <select class="form-input" id="regSector"></select>
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label">Congregação</label>
+            <select class="form-input" id="regCongregation"></select>
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:10px;">
+          <label class="form-label">E-mail (usado para entrar no sistema) *</label>
+          <input type="email" class="form-input" id="regEmail" placeholder="voce@email.com" autocomplete="email">
+        </div>
+        <div class="form-group" style="margin-bottom:14px;">
+          <label class="form-label">Senha * (mínimo 6 caracteres)</label>
+          <input type="password" class="form-input" id="regPassword" placeholder="••••••••" autocomplete="new-password">
+        </div>
+        <div id="registerError" style="display:none; color:var(--error); font-size:13px; margin-bottom:10px;"></div>
+        <button class="btn btn-primary" style="width:100%;" onclick="submitMemberRegister()">Criar meu cadastro</button>
+        <button class="btn btn-ghost" style="width:100%; margin-top:8px;" onclick="navigate('screenLogin')">Voltar ao login</button>
+      </div>
+
+      <div class="card card--wide" id="registerVerifyCard" style="display:none;">
+        <h3 class="card-title">Confirme seu celular</h3>
+        <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px; line-height:1.5;">
+          Enviamos um código de 6 dígitos para o seu celular. Informe-o abaixo para confirmar seu cadastro.
+        </p>
+        <div class="form-group" style="margin-bottom:14px;">
+          <label class="form-label">Código de verificação *</label>
+          <input type="text" class="form-input" id="regVerifyCode" placeholder="000000" inputmode="numeric" maxlength="6">
+        </div>
+        <div id="registerVerifyError" style="display:none; color:var(--error); font-size:13px; margin-bottom:10px;"></div>
+        <button class="btn btn-primary" style="width:100%;" onclick="submitPhoneVerify()">Confirmar</button>
+        <button class="btn btn-ghost" style="width:100%; margin-top:8px;" onclick="finishRegisterLater()">Confirmar depois</button>
+      </div>
     </div>
   </section>
 
@@ -487,6 +559,7 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
       <button class="btn btn-outline" onclick="navigate('screenNewReceipt')">Novo Recebimento</button>
       <button class="btn btn-primary" onclick="printReceipt()">Imprimir / Salvar PDF</button>
     </div>
+    <button class="btn btn-success" id="btnThankWhats" style="width:100%; margin-top:12px; display:none;" onclick="thankByWhatsApp()">Agradecer por WhatsApp</button>
     <button class="btn btn-ghost" style="width:100%; margin-top:12px;" onclick="navigate('screenCloseService')">Fechar Culto</button>
   </section>
 
@@ -954,12 +1027,12 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
       </div>
       <div class="form-row" style="margin-bottom:10px;">
         <div class="form-group" style="margin:0;">
-          <label class="form-label">CPF *</label>
-          <input type="text" class="form-input" id="memberCpf" placeholder="000.000.000-00" inputmode="numeric" maxlength="14" oninput="maskCpf(this)">
-        </div>
-        <div class="form-group" style="margin:0;">
           <label class="form-label">CEP *</label>
           <input type="text" class="form-input" id="memberCep" placeholder="00000-000" inputmode="numeric" maxlength="9" oninput="maskCep(this)">
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">Nº da residência *</label>
+          <input type="text" class="form-input" id="memberNumber" placeholder="Ex: 123" maxlength="20">
         </div>
       </div>
       <div class="form-group" style="margin-bottom:14px;">
@@ -1146,9 +1219,10 @@ function getAllPeople() {
       name: (prof && prof.name) || u.name,
       congregationId: u.congregationId,
       phone: (prof && prof.phone) || u.phone || '',
-      cpf: (prof && prof.cpf) || null,
-      cep: (prof && prof.cep) || null,
-      profileComplete: !!(prof && prof.name && prof.cpf && prof.cep && prof.phone),
+      cpf: (prof && prof.cpf) || u.cpf || null,
+      cep: (prof && prof.cep) || u.cep || null,
+      addressNumber: (prof && prof.addressNumber) || u.addressNumber || '',
+      profileComplete: (prof && prof.name && prof.cpf && prof.cep && prof.addressNumber && prof.phone) ? true : !!u.profileComplete,
       type: 'Membro',
       memberCode: u.memberCode
     };
@@ -1163,6 +1237,7 @@ let currentUser = null;
 let selectedSector = null;
 let selectedCongregation = null;
 let currentReceipt = { person: null, type: '', value: 0 };
+let lastReceipt = null;
 let serviceReceipts = [];
 let recognition = null;
 
@@ -2032,7 +2107,111 @@ async function logout() {
   navigate('screenLogin');
 }
 
-// SECTOR / CONGREGATION
+// ============ AUTOCADASTRO DO MEMBRO ============
+let pendingRegisterUser = null;
+
+$('btnGoRegister').onclick = () => {
+  $('registerCard').style.display = 'block';
+  $('registerVerifyCard').style.display = 'none';
+  $('registerError').style.display = 'none';
+  ['regName','regCpf','regPhone','regCep','regNumber','regEmail','regPassword'].forEach(id => { $(id).value = ''; });
+  loadPublicSectors();
+  navigate('screenRegister');
+};
+
+async function loadPublicSectors() {
+  let list = [];
+  try {
+    const out = await Api.get('/api/public/sectors');
+    list = (out.sectors || []).map(mapSector);
+  } catch (e) { list = sectorsData || []; }
+  const selSec = $('regSector');
+  selSec.innerHTML = '<option value="">—</option>' + list.map(s => `<option value="${s.id}">${String(s.id).padStart(2,'0')} — ${s.name}</option>`).join('');
+  selSec.onchange = () => fillRegisterCongregations(list);
+  fillRegisterCongregations(list);
+}
+
+function fillRegisterCongregations(list) {
+  const secId = Number($('regSector').value);
+  const sec = (list || []).find(s => s.id === secId);
+  const selCong = $('regCongregation');
+  const congs = sec ? (sec.congregations || []) : [];
+  selCong.innerHTML = '<option value="">—</option>' + congs.map(c => `<option value="${c.id}">${c.code} — ${c.name}</option>`).join('');
+}
+
+function registerFieldError(errs) {
+  const box = $('registerError');
+  box.innerHTML = errs.map(e => '&bull; ' + e).join('<br>');
+  box.style.display = 'block';
+}
+
+async function submitMemberRegister() {
+  const name = ($('regName').value || '').trim();
+  const cpf = onlyDigits($('regCpf').value);
+  const phone = onlyDigits($('regPhone').value);
+  const cep = onlyDigits($('regCep').value);
+  const addressNumber = ($('regNumber').value || '').trim();
+  const email = ($('regEmail').value || '').trim().toLowerCase();
+  const password = $('regPassword').value || '';
+  const sectorId = Number($('regSector').value) || null;
+  const congregationId = Number($('regCongregation').value) || null;
+
+  const errs = [];
+  if (name.length < 5 || !name.includes(' ')) errs.push('Informe o nome completo (nome e sobrenome).');
+  if (cpf.length !== 11 || !validCpf(cpf)) errs.push('CPF inválido.');
+  if (phone.length < 10 || phone.length > 11) errs.push('Celular/WhatsApp inválido (DDD + número).');
+  if (cep.length !== 8) errs.push('CEP inválido (8 dígitos).');
+  if (!addressNumber) errs.push('Informe o número da residência.');
+  if (!email || !email.includes('@')) errs.push('Informe um e-mail válido.');
+  if (password.length < 6) errs.push('A senha deve ter ao menos 6 caracteres.');
+  if (errs.length) return registerFieldError(errs);
+  $('registerError').style.display = 'none';
+
+  let out;
+  try {
+    out = await Api.post('/api/auth/register', {
+      name, cpf, cep, phone, addressNumber, email, password, sectorId, congregationId,
+    });
+  } catch (e) { return registerFieldError([e && e.message ? e.message : 'Falha ao cadastrar']); }
+
+  Storage.setUser(out.user);
+  pendingRegisterUser = out.user;
+  $('regVerifyCode').value = '';
+  $('registerVerifyError').style.display = 'none';
+  $('registerCard').style.display = 'none';
+  $('registerVerifyCard').style.display = 'block';
+  if (out.verificationCode) {
+    showToast('Código de verificação: ' + out.verificationCode, 'success');
+  } else {
+    showToast('Cadastro criado! Confirme seu celular.', 'success');
+  }
+}
+
+async function submitPhoneVerify() {
+  const code = onlyDigits($('regVerifyCode').value);
+  if (code.length !== 6) {
+    $('registerVerifyError').innerHTML = 'Informe o código de 6 dígitos.';
+    $('registerVerifyError').style.display = 'block';
+    return;
+  }
+  try {
+    const out = await Api.post('/api/auth/verify-phone', { code });
+    if (out && out.user) { Storage.setUser(out.user); pendingRegisterUser = null; }
+  } catch (e) {
+    $('registerVerifyError').innerHTML = e && e.message ? e.message : 'Código incorreto';
+    $('registerVerifyError').style.display = 'block';
+    return;
+  }
+  showToast('Cadastro confirmado!', 'success');
+  await afterLogin(Storage.getUser());
+}
+
+async function finishRegisterLater() {
+  showToast('Você pode confirmar o celular depois no seu painel.', 'warning');
+  await afterLogin(pendingRegisterUser || Storage.getUser());
+}
+
+
 function renderReceiptContext() {
   const sec = selectedSector;
   const cong = selectedCongregation;
@@ -2190,10 +2369,14 @@ function searchPerson(query) {
   }
 
   const q = query.trim().toLowerCase();
-  const matches = getAllPeople().filter(p =>
-    (p.name.toLowerCase().includes(q) || (p.memberCode || '').toLowerCase().includes(q)) &&
-    (!selectedCongregation || p.congregationId === selectedCongregation.id)
-  );
+  const qDigits = onlyDigits(query);
+  const matches = getAllPeople().filter(p => {
+    if (selectedCongregation && p.congregationId !== selectedCongregation.id) return false;
+    if (p.name.toLowerCase().includes(q)) return true;
+    if ((p.memberCode || '').toLowerCase().includes(q)) return true;
+    if (qDigits.length >= 11 && p.cpf && onlyDigits(p.cpf) === qDigits) return true;
+    return false;
+  });
 
   if (matches.length > 0) {
     results.innerHTML = matches.map(p => `
@@ -2392,6 +2575,33 @@ function renderReceipt(r) {
     </div>
   `;
   $('receiptContent').innerHTML = html;
+  lastReceipt = r;
+  const btn = $('btnThankWhats');
+  if (btn) btn.style.display = thankPhoneFor(r) ? 'block' : 'none';
+}
+
+// Telefone do contribuinte para a mensagem de agradecimento (por código/CPF/telefone no recibo)
+function thankPhoneFor(r) {
+  if (!r || !r.person) return '';
+  const people = getAllPeople();
+  const p = people.find(x =>
+    (r.person.memberCode && x.memberCode && x.memberCode === r.person.memberCode) ||
+    (r.person.cpf && x.cpf && onlyDigits(x.cpf) === onlyDigits(r.person.cpf)) ||
+    (x.name && r.person.name && x.name.toLowerCase() === String(r.person.name).toLowerCase() && x.phone)
+  );
+  return (p && p.phone) ? p.phone : '';
+}
+
+function thankByWhatsApp() {
+  if (!lastReceipt) return;
+  const phone = onlyDigits(thankPhoneFor(lastReceipt));
+  if (phone.length < 10) return showToast('Contribuinte sem celular cadastrado', 'warning');
+  const intl = phone.length === 11 ? '55' + phone : '55' + phone;
+  const nome = String(lastReceipt.person?.name || '').split(' ')[0] || 'irmão(ã)';
+  const valor = fmtMoney(lastReceipt.value);
+  const tipo = lastReceipt.type || 'contribuição';
+  const msg = `A paz do Senhor, ${nome}! A Assembleia de Deus Missões agradece de coração pelo seu ${tipo} de ${valor}. "Cada um contribua segundo tiver proposto no coração" (2 Coríntios 9:7). Deus te abençoe!`;
+  window.open('https://wa.me/' + intl + '?text=' + encodeURIComponent(msg), '_blank');
 }
 
 function printReceipt() {
@@ -2843,6 +3053,7 @@ function renderUsersList() {
           <div class="list-item-sub">${u.email} • ${ROLE_LABELS[u.role]}${sec ? ` • Setor ${String(sec.id).padStart(2,'0')}` : ''}${cong ? ` • Cong ${cong.code}` : ''}${u.memberCode ? ` • ${u.memberCode}` : ''}</div>
         </div>
         <span class="list-item-badge" style="background:${badgeColor}; color:${u.role === 'tesoureiro_setor' ? 'var(--primary)' : 'white'};">${ROLE_LABELS[u.role]}</span>
+        ${u.email !== currentUser.email && canManageUser(u) ? `<button class="btn btn-ghost" title="Redefinir senha" style="padding:8px;" onclick="resetUserPassword(${idx})">🔑</button>` : ''}
         ${canDelete ? `<button class="btn btn-ghost" style="padding:8px; color:var(--error);" onclick="deleteUser(${idx})">✕</button>` : ''}
       </div>`;
   }).join('') || '<div style="color:var(--text-muted); font-size:14px; text-align:center; padding:16px;">Nenhum usuário no seu escopo</div>';
@@ -2876,6 +3087,23 @@ function deleteUser(idx) {
     showToast('Usuário excluído', 'success');
     renderUsersList();
   });
+}
+
+// Reset de senha do membro pelo admin: gera senha temporária para o fiel trocar no 1º acesso.
+function resetUserPassword(idx) {
+  const u = USERS[idx];
+  if (!u) return;
+  if (!canManageUser(u)) return showToast('Você não pode redefinir a senha deste usuário', 'error');
+  if (HAS_FETCH_MODE() && u.id) {
+    showModal('Redefinir Senha', `Gerar uma senha temporária para "${u.name}" (${u.email})? O fiel deverá trocá-la no primeiro acesso.`, async () => {
+      let out;
+      try { out = await Api.post('/api/users/' + encodeURIComponent(u.id) + '/reset-password', {}); }
+      catch (e) { return apiErrorToast(e); }
+      showModal('Senha Temporária', `Senha temporária de ${u.name}: ${out.temporaryPassword} — informe ao fiel por um canal seguro.`);
+    });
+  } else {
+    showToast('Redefinição de senha exige conexão com o servidor', 'warning');
+  }
 }
 
 // CADASTRO DE SETORES (sede)
@@ -3831,15 +4059,16 @@ function getMemberProfileFor(u) {
 function isMemberProfileComplete(u) {
   if (u && u.profileComplete) return true;
   const p = getMemberProfileFor(u);
-  return !!(p && p.name && p.cpf && p.cep && p.phone);
+  return !!(p && p.name && p.cpf && p.cep && p.addressNumber && p.phone);
 }
 function memberProfilePrefill(u) {
   const p = getMemberProfileFor(u) || {};
-  if (p.name && p.cpf && p.cep && p.phone) return p;
+  if (p.name && p.cpf && p.cep && p.addressNumber && p.phone) return p;
   return {
     name: p.name || (u && u.name) || '',
     cpf: p.cpf || (u && u.cpf ? fmtCpf(u.cpf) : ''),
     cep: p.cep || (u && u.cep ? fmtCep(u.cep) : ''),
+    addressNumber: p.addressNumber || (u && u.addressNumber) || '',
     phone: p.phone || (u && u.phone ? fmtPhone(u.phone) : ''),
   };
 }
@@ -3888,6 +4117,7 @@ function renderMemberProfileSection() {
     $('memberName').value = p.name || '';
     $('memberCpf').value = p.cpf || '';
     $('memberCep').value = p.cep || '';
+    $('memberNumber').value = p.addressNumber || '';
     $('memberPhone').value = p.phone || '';
     $('memberGateTag').textContent = complete ? 'edição dos dados' : 'obrigatório no 1º acesso';
     $('memberGateCancel').style.display = complete ? 'block' : 'none';
@@ -3902,6 +4132,7 @@ function renderMemberProfileSection() {
     ['Nome completo', p.name],
     ['CPF', p.cpf],
     ['CEP', p.cep],
+    ['Nº da residência', p.addressNumber],
     ['Telefone / WhatsApp', p.phone]
   ].map(([label, val]) => `<div class="list-item"><div class="list-item-info"><div class="list-item-sub">${label}</div><div class="list-item-title">${val || '—'}</div></div></div>`).join('');
   $('memberProfileCard').style.display = 'block';
@@ -3912,11 +4143,13 @@ async function saveMemberProfile() {
   const name = ($('memberName').value || '').trim();
   const cpf = onlyDigits($('memberCpf').value);
   const cep = onlyDigits($('memberCep').value);
+  const addressNumber = ($('memberNumber').value || '').trim();
   const phone = onlyDigits($('memberPhone').value);
   const errs = [];
   if (name.length < 5 || !name.includes(' ')) errs.push('Informe o nome completo (nome e sobrenome).');
   if (cpf.length !== 11 || !validCpf(cpf)) errs.push('CPF inválido.');
   if (cep.length !== 8) errs.push('CEP inválido (8 dígitos).');
+  if (!addressNumber) errs.push('Informe o número da residência.');
   if (phone.length < 10 || phone.length > 11) errs.push('Telefone/WhatsApp inválido (DDD + número).');
   const errBox = $('memberGateError');
   if (errs.length) {
@@ -3928,7 +4161,7 @@ async function saveMemberProfile() {
 
   if (HAS_FETCH_MODE()) {
     try {
-      const out = await Api.put('/api/profile', { name, cpf, cep, phone });
+      const out = await Api.put('/api/profile', { name, cpf, cep, addressNumber, phone });
       if (out && out.user) {
         currentUser = { ...currentUser, ...out.user };
         Storage.setUser(currentUser);
@@ -3941,6 +4174,7 @@ async function saveMemberProfile() {
     name,
     cpf: fmtCpf(cpf),
     cep: fmtCep(cep),
+    addressNumber,
     phone: fmtPhone(phone),
     cpfDigits: cpf,
     cepDigits: cep,

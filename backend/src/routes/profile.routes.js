@@ -36,6 +36,7 @@ const profileSchema = z.object({
   name: z.string().trim().min(2).optional(),
   cpf: z.string().optional().nullable(),
   cep: z.string().optional().nullable(),
+  addressNumber: z.string().trim().max(20).optional().nullable(),
   phone: z.string().optional().nullable(),
 });
 
@@ -78,6 +79,9 @@ router.put('/', async (req, res, next) => {
       if (cep && cep.length !== 8) throw httpError(422, 'CEP inválido (8 dígitos)');
       data.cep = cep || null;
     }
+    if (input.addressNumber !== undefined) {
+      data.addressNumber = input.addressNumber ? String(input.addressNumber).trim() : null;
+    }
     if (input.phone !== undefined) {
       const phone = digits(input.phone);
       if (phone && (phone.length < 10 || phone.length > 11)) {
@@ -89,8 +93,9 @@ router.put('/', async (req, res, next) => {
     const willName = data.name !== undefined ? data.name : current.name;
     const willCpf = data.cpf !== undefined ? data.cpf : current.cpf;
     const willCep = data.cep !== undefined ? data.cep : current.cep;
+    const willNumber = data.addressNumber !== undefined ? data.addressNumber : current.addressNumber;
     const willPhone = data.phone !== undefined ? data.phone : current.phone;
-    const complete = !!(willName && willCpf && willCep && willPhone);
+    const complete = !!(willName && willCpf && willCep && willNumber && willPhone);
     if (complete && !current.profileCompletedAt) data.profileCompletedAt = new Date();
 
     const user = await prisma.$transaction(async (tx) => {
@@ -103,8 +108,8 @@ router.put('/', async (req, res, next) => {
         sectorId: current.sectorId,
         congregationId: current.congregationId,
         summary: 'Atualização de cadastro do membro',
-        before: { name: current.name, cpf: current.cpf, cep: current.cep, phone: current.phone, profileCompletedAt: toIso(current.profileCompletedAt) },
-        after: { name: updated.name, cpf: updated.cpf, cep: updated.cep, phone: updated.phone, profileCompletedAt: toIso(updated.profileCompletedAt) },
+        before: { name: current.name, cpf: current.cpf, cep: current.cep, addressNumber: current.addressNumber, phone: current.phone, profileCompletedAt: toIso(current.profileCompletedAt) },
+        after: { name: updated.name, cpf: updated.cpf, cep: updated.cep, addressNumber: updated.addressNumber, phone: updated.phone, profileCompletedAt: toIso(updated.profileCompletedAt) },
       });
       return updated;
     });

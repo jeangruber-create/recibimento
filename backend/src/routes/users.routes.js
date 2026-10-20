@@ -200,6 +200,42 @@ router.put('/:id', async (req, res, next) => {
   }
 });
 
+// Reset de senha pelo admin: gera senha temporária que o fiel troca no 1º acesso.
+router.post('/:id/reset-password', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) throw httpError(400, 'ID inválido');
+    const target = await prisma.user.findUnique({ where: { id } });
+    if (!target) throw httpError(404, 'Usuário não encontrado');
+    if (!canManageTarget(req.user, target)) throw httpError(403, 'Usuário fora do seu escopo');
+
+    const temp = String(Math.floor(100000 + Math.random() * 900000));
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id },
+        data: {
+          passwordHash: await bcrypt.hash(temp, 10),
+          resetCodeHash: require('crypto').createHash('sha256').update(temp).digest('hex'),
+          resetCodeExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        },
+      });
+      await logAudit(tx, {
+        user: req.user,
+        action: 'reset-password',
+        entity: 'User',
+        entityId: id,
+        sectorId: target.sectorId,
+        congregationId: target.congregationId,
+        summary: `Reset de senha de ${target.email}`,
+        before: { email: target.email },
+      });
+    });
+    res.json({ ok: true, temporaryPassword: temp });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.delete('/:id', async (req, res, next) => {
   try {
     const id = Number(req.params.id);

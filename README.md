@@ -52,6 +52,11 @@ Depois abra `http://localhost:8080/index.html` (o front detecta a API em `http:/
 - **Fechamento semanal**: semana seg→dom; congregação fecha/justifica, setor reabre as do seu setor, sede valida.
 - **Painel de Controle**: ordem dos cards — **indicadores no topo** (`Resumo do Dia` + `Resumo do Período`), depois **Filtros** e **Resultados da Consulta**. O **Resumo por Dia da Semana** (seg→dom da semana corrente, coletado por data) fica na **lateral (≥1024px)** e **logo abaixo (celular)**, para sede/setor/congregação.
 - **Repasse**: valor previsto ou declarado **nunca é negativo** — com caixa deficitário na semana, declara-se `R$ 0,00` e a diferença exige justificativa no envio da prestação.
+- **Limite de despesa**: o teto de **40%** é calculado sobre o **total de receitas da semana** (seg→dom), nunca por dia. Fechar dentro do limite (mesmo com saldo) libera o movimento; só exige justificativa quando as despesas passam de 40%.
+- **Portal do membro (autocadastro)**: o fiel cria a própria conta em **"Sou membro — quero me cadastrar"** na tela de login, informando **nome completo, CPF, CEP, número da residência e celular** (mais e-mail e senha). Esses dados alimentam os demais módulos. Após o cadastro, o sistema confirma o celular por um **código de 6 dígitos**. O membro ganha um **código único (ADMxxxxxx)** e um QR code.
+- **Senha do fiel**: é definida pelo próprio membro no autocadastro. Se perder, **somente o admin** redefine (`🔑` na lista de usuários), gerando uma **senha temporária** que o fiel troca no 1º acesso.
+- **Agradecimento por WhatsApp**: ao registrar um recibo, se o contribuinte for identificado por **código de membro ou CPF**, o botão **"Agradecer por WhatsApp"** abre o `wa.me` com uma mensagem de agradecimento personalizada (sem custo de API). O coletor também pode buscar o membro por nome, código ou CPF.
+
 
 ### 4.1 Matriz de permissões por perfil
 
@@ -103,7 +108,7 @@ Com o backend no ar, rode o teste de integração:
 
 ```powershell
 $env:Path = "C:\Program Files\nodejs;" + $env:Path
-node "$env:TEMP\opencode\apitest.mjs" "index.html"   # 108/108
+node "$env:TEMP\opencode\apitest.mjs" "index.html"   # 117/117
 ```
 
 O teste reproduz o cookie http-only num jar próprio, então cobre o fluxo real de sessão. A suíte

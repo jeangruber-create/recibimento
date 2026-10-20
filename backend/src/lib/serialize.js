@@ -17,9 +17,12 @@ function publicUser(u) {
     phone: u.phone ?? null,
     cpf: u.cpf ?? null,
     cep: u.cep ?? null,
+    addressNumber: u.addressNumber ?? null,
     memberCode: u.memberCode ?? null,
     profileCompletedAt: u.profileCompletedAt ? iso(u.profileCompletedAt) : null,
-    profileComplete: !!(u.name && u.cpf && u.cep && u.phone),
+    profileComplete: !!(u.name && u.cpf && u.cep && u.addressNumber && u.phone),
+    emailVerifiedAt: u.emailVerifiedAt ? iso(u.emailVerifiedAt) : null,
+    verified: !!u.emailVerifiedAt,
     sectorId: u.sectorId ?? null,
     congregationId: u.congregationId ?? null,
   };

@@ -49,8 +49,13 @@ model User {
   phone              String?
   cpf                String?       @unique
   cep                String?
+  addressNumber      String?
   memberCode         String?       @unique
   profileCompletedAt DateTime?
+  emailVerifiedAt    DateTime?
+  verifiedVia        String?
+  resetCodeHash        String?
+  resetCodeExpiresAt   DateTime?
   sectorId           Int?
   congregationId     Int?
   createdAt          DateTime      @default(now())
