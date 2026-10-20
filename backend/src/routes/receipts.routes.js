@@ -3,7 +3,7 @@ const { z } = require('zod');
 const prisma = require('../prisma');
 const { authRequired } = require('../middleware/auth');
 const { httpError } = require('../middleware/error');
-const { receiptWhere, resolveReceiptScope, canWriteReceipt } = require('../lib/scope');
+const { receiptWhere, resolveReceiptScope, canWriteReceipt, memberSelfReceipt } = require('../lib/scope');
 const { receipt: serializeReceipt } = require('../lib/serialize');
 const { logAudit } = require('../lib/audit');
 
@@ -87,20 +87,34 @@ router.post('/', async (req, res, next) => {
   try {
     const data = createSchema.parse(req.body);
     const scope = await resolveReceiptScope(prisma, req.user, data);
+
+    // Membro: o recibo é sempre dele e sempre PIX (dízimo/oferta de casa).
+    let personName = data.person.name;
+    let personMemberCode = data.person.memberCode ?? null;
+    let payment = data.payment || 'dinheiro';
+    let createdById = req.user.sub;
+    if (req.user.role === 'membro') {
+      if (!req.user.memberCode) throw httpError(400, 'Membro sem código de identificação');
+      const self = memberSelfReceipt(req.user);
+      personName = self.person.name;
+      personMemberCode = self.person.memberCode;
+      payment = self.payment;
+    }
+
     const receipt = await prisma.$transaction(async (tx) => {
       const created = await tx.receipt.create({
         data: {
           number: data.number || generateNumber(),
-          personName: data.person.name,
-          personMemberCode: data.person.memberCode ?? null,
+          personName,
+          personMemberCode,
           type: data.type,
           value: data.value,
-          payment: data.payment || 'dinheiro',
+          payment,
           status: data.status || 'confirmado',
           date: data.date ? new Date(data.date) : new Date(),
           sectorId: scope.sectorId,
           congregationId: scope.congregationId,
-          createdById: req.user.sub,
+          createdById,
         },
       });
       await logAudit(tx, {

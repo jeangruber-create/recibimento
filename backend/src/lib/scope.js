@@ -32,7 +32,23 @@ async function resolveReceiptScope(prisma, user, input) {
     return { sectorId: user.sectorId, congregationId: user.congregationId };
   }
 
+  // Membro: registra o próprio dízimo/oferta (sempre na sua congregação).
+  if (user.role === 'membro') {
+    if (!user.sectorId || !user.congregationId) throw httpError(403, 'Cadastro sem congregação vinculada');
+    return { sectorId: user.sectorId, congregationId: user.congregationId };
+  }
+
   throw httpError(403, 'Perfil sem permissão para registrar recebimentos');
+}
+
+// Um membro só pode criar/editar recibos vinculados a ele mesmo.
+function memberSelfReceipt(user, input) {
+  const code = user.memberCode || null;
+  const name = user.name || (input && input.person && input.person.name) || '';
+  return {
+    person: { name, memberCode: code },
+    payment: 'pix',
+  };
 }
 
 function canWriteReceipt(user, receipt) {
@@ -43,4 +59,4 @@ function canWriteReceipt(user, receipt) {
   return false;
 }
 
-module.exports = { receiptWhere, resolveReceiptScope, canWriteReceipt };
+module.exports = { receiptWhere, resolveReceiptScope, canWriteReceipt, memberSelfReceipt };

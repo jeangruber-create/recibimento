@@ -25,6 +25,12 @@ function publicUser(u) {
     verified: !!u.emailVerifiedAt,
     sectorId: u.sectorId ?? null,
     congregationId: u.congregationId ?? null,
+    // Chave PIX da congregação (para o membro dizimar/ofertar de casa). Presente
+    // apenas quando a relação `congregation` foi carregada na consulta.
+    pixKey: (u.congregation && u.congregation.pixKey) || null,
+    pixKeyType: (u.congregation && u.congregation.pixKeyType) || null,
+    congregationCode: (u.congregation && u.congregation.code) || null,
+    congregationName: (u.congregation && u.congregation.name) || null,
   };
 }
 
@@ -78,6 +84,8 @@ function sector(s) {
       code: c.code,
       name: c.name,
       address: c.address ?? '',
+      pixKey: c.pixKey ?? '',
+      pixKeyType: c.pixKeyType ?? '',
     })),
   };
 }

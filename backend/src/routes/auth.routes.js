@@ -58,7 +58,7 @@ function cookieOpts() {
 router.post('/login', async (req, res, next) => {
   try {
     const { email, password } = loginSchema.parse(req.body);
-    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() }, include: { congregation: true } });
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
       throw httpError(401, 'Credenciais inválidas');
     }
@@ -163,7 +163,7 @@ router.post('/verify-phone', authRequired, async (req, res, next) => {
 
 router.get('/me', authRequired, async (req, res, next) => {
   try {
-    const user = await prisma.user.findUnique({ where: { id: req.user.sub } });
+    const user = await prisma.user.findUnique({ where: { id: req.user.sub }, include: { congregation: true } });
     if (!user) throw httpError(404, 'Usuário não encontrado');
     res.json({ user: publicUser(user) });
   } catch (e) {

@@ -87,6 +87,8 @@ model Congregation {
   code        String
   name        String
   address     String?
+  pixKey      String?
+  pixKeyType  String?
   sectorId    Int
   sector      Sector    @relation(fields: [sectorId], references: [id])
   users       User[]

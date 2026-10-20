@@ -14,6 +14,8 @@ const createCongSchema = z.object({
   code: z.string().trim().min(1),
   name: z.string().trim().min(2),
   address: z.string().optional().nullable(),
+  pixKey: z.string().trim().optional().nullable(),
+  pixKeyType: z.string().trim().optional().nullable(),
 });
 
 function requireSede(req) {
@@ -171,7 +173,7 @@ router.post('/:id/congregations', async (req, res, next) => {
     const sectorId = Number(req.params.id);
     if (!Number.isInteger(sectorId)) throw httpError(400, 'ID inválido');
     canManageSectorStructure(req, sectorId);
-    const { code, name, address } = createCongSchema.parse(req.body);
+    const { code, name, address, pixKey, pixKeyType } = createCongSchema.parse(req.body);
 
     const sector = await prisma.sector.findUnique({ where: { id: sectorId } });
     if (!sector) throw httpError(404, 'Setor não encontrado');
@@ -182,15 +184,15 @@ router.post('/:id/congregations', async (req, res, next) => {
     if (dup) throw httpError(409, 'Código já existe neste setor');
 
     const created = await prisma.$transaction(async (tx) => {
-      const c = await tx.congregation.create({ data: { sectorId, code, name, address: address || null } });
+      const c = await tx.congregation.create({ data: { sectorId, code, name, address: address || null, pixKey: pixKey || null, pixKeyType: pixKeyType || null } });
       await logAudit(tx, {
         user: req.user, action: 'create', entity: 'Congregation', entityId: c.id,
         sectorId, congregationId: c.id, summary: 'Cadastro de congregação',
-        after: { code, name, address: address || null },
+        after: { code, name, address: address || null, pixKey: pixKey || null, pixKeyType: pixKeyType || null },
       });
       return c;
     });
-    res.status(201).json({ congregation: { id: created.id, code: created.code, name: created.name, address: created.address || '' } });
+    res.status(201).json({ congregation: { id: created.id, code: created.code, name: created.name, address: created.address || '', pixKey: created.pixKey || '', pixKeyType: created.pixKeyType || '' } });
   } catch (e) {
     next(e);
   }
@@ -202,7 +204,7 @@ router.put('/:id/congregations/:cid', async (req, res, next) => {
     const cid = Number(req.params.cid);
     if (!Number.isInteger(sectorId) || !Number.isInteger(cid)) throw httpError(400, 'ID inválido');
     canManageSectorStructure(req, sectorId);
-    const { code, name, address } = createCongSchema.parse(req.body);
+    const { code, name, address, pixKey, pixKeyType } = createCongSchema.parse(req.body);
 
     const existing = await prisma.congregation.findUnique({ where: { id: cid } });
     if (!existing) throw httpError(404, 'Congregação não encontrada');
@@ -216,17 +218,17 @@ router.put('/:id/congregations/:cid', async (req, res, next) => {
     const updated = await prisma.$transaction(async (tx) => {
       const c = await tx.congregation.update({
         where: { id: cid },
-        data: { code, name, address: address || null },
+        data: { code, name, address: address || null, pixKey: pixKey || null, pixKeyType: pixKeyType || null },
       });
       await logAudit(tx, {
         user: req.user, action: 'update', entity: 'Congregation', entityId: cid,
         sectorId, congregationId: cid, summary: `Alteração da congregação ${code} — ${name}`,
-        before: { code: existing.code, name: existing.name, address: existing.address },
-        after: { code, name, address: address || null },
+        before: { code: existing.code, name: existing.name, address: existing.address, pixKey: existing.pixKey, pixKeyType: existing.pixKeyType },
+        after: { code, name, address: address || null, pixKey: pixKey || null, pixKeyType: pixKeyType || null },
       });
       return c;
     });
-    res.json({ congregation: { id: updated.id, code: updated.code, name: updated.name, address: updated.address || '' } });
+    res.json({ congregation: { id: updated.id, code: updated.code, name: updated.name, address: updated.address || '', pixKey: updated.pixKey || '', pixKeyType: updated.pixKeyType || '' } });
   } catch (e) {
     next(e);
   }

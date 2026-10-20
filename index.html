@@ -723,6 +723,23 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
         <label class="form-label">Endereço</label>
         <input type="text" class="form-input" id="congRegAddress" placeholder="Rua, número, bairro">
       </div>
+      <div class="form-row" style="display:flex; gap:8px;">
+        <div class="form-group" style="flex:1;">
+          <label class="form-label">Tipo da chave PIX</label>
+          <select class="form-select" id="congRegPixType">
+            <option value="">— não informada —</option>
+            <option value="CPF">CPF</option>
+            <option value="CNPJ">CNPJ</option>
+            <option value="E-mail">E-mail</option>
+            <option value="Telefone">Telefone</option>
+            <option value="Aleatória">Aleatória</option>
+          </select>
+        </div>
+        <div class="form-group" style="flex:2;">
+          <label class="form-label">Chave PIX da congregação</label>
+          <input type="text" class="form-input" id="congRegPix" placeholder="Chave para o dízimo/oferta pelo membro">
+        </div>
+      </div>
       <button class="btn btn-primary" id="btnSaveCongregation">Cadastrar Congregação</button>
       <button class="btn btn-ghost" style="width:100%; margin-top:8px;" onclick="navigate('screenAdmin')">Voltar</button>
     </div>
@@ -1068,6 +1085,30 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
       <div style="font-family:monospace; font-size:22px; font-weight:600; color:var(--primary); letter-spacing:2px;" id="memberCodeDisplay">—</div>
       <div style="font-size:13px; color:var(--text-muted); margin-top:6px;" id="memberSubtitle">—</div>
       <p style="font-size:12px; color:var(--text-muted); margin-top:10px; line-height:1.5;">Apresente este QR Code (ou o código acima) ao coletor para identificar seu cadastro rapidamente.</p>
+    </div>
+
+    <div class="card member-card" id="memberGiveCard">
+      <h3 class="card-title">Dizimar / Ofertar de casa <span style="font-weight:400; color:var(--text-muted); font-size:13px;">via PIX</span></h3>
+      <div id="memberPixBox" style="margin:6px 0 12px;"></div>
+      <div class="form-row" style="display:flex; gap:8px;">
+        <div class="form-group" style="flex:1;">
+          <label class="form-label">Tipo</label>
+          <select class="form-select" id="memGiveType">
+            <option value="Dízimo">Dízimo</option>
+            <option value="Oferta">Oferta</option>
+          </select>
+        </div>
+        <div class="form-group" style="flex:1;">
+          <label class="form-label">Valor (R$)</label>
+          <input type="text" class="form-input" id="memGiveValue" inputmode="decimal" placeholder="0,00">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Observação (opcional)</label>
+        <input type="text" class="form-input" id="memGiveNote" placeholder="Ex.: dízimo do mês">
+      </div>
+      <button class="btn btn-primary" style="width:100%;" onclick="submitMemberGive()">Registrar meu dízimo/oferta</button>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:8px; line-height:1.5;">Ao registrar, seu dízimo/oferta entra no sistema da sua congregação. Faça o PIX usando a chave acima.</p>
     </div>
 
     <div class="card member-card">
@@ -1698,6 +1739,8 @@ function mapSector(s) {
       code: c.code,
       name: c.name,
       address: c.address || '',
+      pixKey: c.pixKey || '',
+      pixKeyType: c.pixKeyType || '',
     })),
   };
 }
@@ -3412,6 +3455,8 @@ function renderCongregationRegisterScreen() {
   $('congRegCode').value = '';
   $('congRegName').value = '';
   $('congRegAddress').value = '';
+  if ($('congRegPixType')) $('congRegPixType').value = '';
+  if ($('congRegPix')) $('congRegPix').value = '';
   renderCongsList();
 }
 
@@ -3420,6 +3465,8 @@ $('btnSaveCongregation')?.addEventListener('click', async () => {
   const code = $('congRegCode').value.trim();
   const name = $('congRegName').value.trim();
   const address = $('congRegAddress').value.trim();
+  const pixKey = ($('congRegPix')?.value || '').trim();
+  const pixKeyType = ($('congRegPixType')?.value || '').trim();
 
   if (!secId || !code || !name) return showToast('Preencha setor, código e nome', 'error');
 
@@ -3428,12 +3475,13 @@ $('btnSaveCongregation')?.addEventListener('click', async () => {
   const isEditing = !!editingCongregation;
   if (!isEditing && sec.congregations.find(c => c.code === code)) return showToast('Código já existe neste setor', 'error');
 
+  const payload = { code, name, address, pixKey, pixKeyType };
   if (HAS_FETCH_MODE()) {
     try {
       if (isEditing) {
-        await Api.put(`/api/sectors/${editingCongregation.secId}/congregations/${editingCongregation.congId}`, { code, name, address });
+        await Api.put(`/api/sectors/${editingCongregation.secId}/congregations/${editingCongregation.congId}`, payload);
       } else {
-        await Api.post(`/api/sectors/${secId}/congregations`, { code, name, address });
+        await Api.post(`/api/sectors/${secId}/congregations`, payload);
       }
     } catch (e) { return apiErrorToast(e); }
     try { await refreshSectors(); } catch (e) { /* mantém cache atual */ }
@@ -3441,10 +3489,10 @@ $('btnSaveCongregation')?.addEventListener('click', async () => {
     if (isEditing) {
       const target = sectorsData.find(s => s.id === editingCongregation.secId);
       const c = target?.congregations.find(x => x.id === editingCongregation.congId);
-      if (c) { c.code = code; c.name = name; c.address = address; }
+      if (c) { c.code = code; c.name = name; c.address = address; c.pixKey = pixKey; c.pixKeyType = pixKeyType; }
     } else {
       const newId = Math.max(...sectorsData.flatMap(s => s.congregations.map(c => c.id)), 0) + 1;
-      sec.congregations.push({ id: newId, code, name, address });
+      sec.congregations.push({ id: newId, code, name, address, pixKey, pixKeyType });
     }
     Storage.saveSectors(sectorsData);
   }
@@ -3453,6 +3501,8 @@ $('btnSaveCongregation')?.addEventListener('click', async () => {
   $('congRegCode').value = '';
   $('congRegName').value = '';
   $('congRegAddress').value = '';
+  if ($('congRegPixType')) $('congRegPixType').value = '';
+  if ($('congRegPix')) $('congRegPix').value = '';
   showToast(isEditing ? `Congregação "${name}" atualizada!` : `Congregação "${name}" cadastrada!`, 'success');
   renderCongsList();
 });
@@ -3467,6 +3517,8 @@ function editCongregation(secId, congId) {
   $('congRegCode').value = c.code;
   $('congRegName').value = c.name;
   $('congRegAddress').value = c.address || '';
+  if ($('congRegPixType')) $('congRegPixType').value = c.pixKeyType || '';
+  if ($('congRegPix')) $('congRegPix').value = c.pixKey || '';
   showToast(`Editando "${c.name}" — ajuste e salve`, 'info');
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -3488,6 +3540,7 @@ function renderCongsList() {
       <div class="list-item-info">
         <div class="list-item-title">${c.code} — ${c.name}</div>
         <div class="list-item-sub">${c.address || 'Sem endereço'}</div>
+        <div class="list-item-sub">PIX: ${c.pixKey ? `${c.pixKey}${c.pixKeyType ? ' (' + c.pixKeyType + ')' : ''}` : '<span style="color:var(--warning);">não informada</span>'}</div>
       </div>
       ${canEdit ? `<button class="btn btn-ghost" style="padding:8px;" title="Editar" onclick="editCongregation(${sec.id}, ${c.id})">✎</button>` : ''}
       ${canDelete ? `<button class="btn btn-ghost" style="padding:8px; color:var(--error);" title="Excluir" onclick="deleteCongregation(${sec.id}, ${c.id})">✕</button>` : ''}
@@ -4452,8 +4505,109 @@ function renderMemberPortal() {
     ? `${String(sec.id).padStart(2,'0')} — ${sec.name} • ${cong.code} — ${cong.name}`
     : (currentUser.email || '');
   renderMemberQR(code);
+  renderMemberGive();
   renderMemberReceipts();
   renderMemberProfileSection();
+}
+
+// Chave PIX da congregação do membro (para dizimar/ofertar de casa).
+function memberCongregationPix() {
+  const sec = sectorsData.find(s => s.id === currentUser?.sectorId);
+  const cong = sec?.congregations.find(c => c.id === currentUser?.congregationId);
+  return {
+    cong,
+    pixKey: (cong && cong.pixKey) || currentUser?.pixKey || '',
+    pixKeyType: (cong && cong.pixKeyType) || currentUser?.pixKeyType || '',
+  };
+}
+
+function renderMemberGive() {
+  const box = $('memberPixBox');
+  if (!box) return;
+  const { cong, pixKey, pixKeyType } = memberCongregationPix();
+  const congName = cong ? `${cong.code} — ${cong.name}` : (currentUser?.congregationName || '');
+  if (!pixKey) {
+    box.innerHTML = `
+      <div style="border:1px solid var(--warning); border-radius:8px; padding:12px; background:#FFF7E6;">
+        <div style="font-size:13px; color:var(--warning); font-weight:600;">Chave PIX ainda não cadastrada</div>
+        <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">A tesouraria da congregação ${congName} precisa cadastrar a chave PIX. Você já pode registrar seu dízimo/oferta abaixo para entrar no sistema.</div>
+      </div>`;
+    return;
+  }
+  box.innerHTML = `
+    <div style="border:1px solid var(--border); border-radius:8px; padding:12px; background:#F5F5F0;">
+      <div style="font-size:12px; color:var(--text-muted);">PIX da congregação ${congName}${pixKeyType ? ' (' + pixKeyType + ')' : ''}</div>
+      <div style="display:flex; align-items:center; gap:8px; margin-top:4px;">
+        <code id="memberPixValue" style="flex:1; font-size:15px; font-weight:600; color:var(--primary); word-break:break-all;">${pixKey}</code>
+        <button class="btn btn-ghost" style="padding:6px 10px; white-space:nowrap;" onclick="copyMemberPix()">Copiar</button>
+      </div>
+    </div>`;
+}
+
+function copyMemberPix() {
+  const el = $('memberPixValue');
+  if (!el) return;
+  const txt = el.textContent || '';
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(() => showToast('Chave PIX copiada', 'success')).catch(() => showToast('Copie manualmente: ' + txt, 'info'));
+  } else {
+    showToast('Copie a chave: ' + txt, 'info');
+  }
+}
+
+// Membro registra o próprio dízimo/oferta (sempre PIX, vinculado ao seu código).
+async function submitMemberGive() {
+  if (currentUser?.role !== 'membro') return showToast('Acesso restrito', 'error');
+  const type = $('memGiveType')?.value || 'Dízimo';
+  const note = ($('memGiveNote')?.value || '').trim();
+  const value = parseFloat(($('memGiveValue')?.value || '').replace(/\./g, '').replace(',', '.'));
+  if (!value || value <= 0) return showToast('Informe um valor válido', 'error');
+  if (!currentUser.memberCode) return showToast('Seu cadastro ainda não tem código de membro', 'error');
+
+  const payload = {
+    person: { name: currentUser.name, memberCode: currentUser.memberCode },
+    type: note ? `${type} - ${note}` : type,
+    value,
+    payment: 'pix',
+    date: new Date().toISOString(),
+  };
+
+  let saved; let queued = false;
+  if (HAS_FETCH_MODE() && isOnline()) {
+    try {
+      const out = await Api.post('/api/receipts', payload);
+      saved = mapReceipt(out.receipt);
+    } catch (e) {
+      if (!e || !e.status) { queued = true; } else { return apiErrorToast(e); }
+    }
+  } else if (HAS_FETCH_MODE()) {
+    queued = true;
+  }
+  if (queued) {
+    saved = {
+      id: SyncQueue.add({ kind: 'receipt', payload }),
+      number: generateReceiptNumber(),
+      person: { name: currentUser.name, memberCode: currentUser.memberCode, congregationId: currentUser.congregationId },
+      type: payload.type, value, payment: 'pix',
+      sectorId: currentUser.sectorId, congregationId: currentUser.congregationId,
+      date: payload.date, status: 'confirmado', pending: true,
+      createdById: currentUser.id ?? null, createdByName: currentUser.name ?? '', createdByEmail: currentUser.email ?? '',
+    };
+  }
+  if (saved) {
+    try { saveMemberGiveLocally(saved); } catch (e) {}
+  }
+  $('memGiveValue').value = '';
+  $('memGiveNote').value = '';
+  showToast(queued ? 'Sem internet — registrado no aparelho e será enviado depois' : 'Dízimo/oferta registrado!', queued ? 'warning' : 'success');
+  renderMemberReceipts();
+}
+
+// Espelha no cache local o recibo do membro (para o histórico offline).
+function saveMemberGiveLocally(r) {
+  const list = Storage.getReceipts();
+  list.push(r);
+  Storage.saveReceipt(r);
 }
 
 function renderMemberQR(code) {
