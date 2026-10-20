@@ -3,7 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#1B3A5C">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ADM Recebimentos">
 <title>ADM Recebimentos - Protótipo V1</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
 <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
@@ -235,6 +243,7 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
   <header class="topbar" id="topbar">
     <div class="topbar-title" id="topbarTitle">ADM Recebimentos</div>
     <div class="topbar-actions">
+      <button class="btn btn-ghost" id="syncBadge" style="display:none; font-size:12px;"></button>
       <button class="btn btn-ghost" id="btnHome" style="display:none;">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle; margin-right:4px;"><path d="M19 12H5"/><polyline points="12 19 5 12 12 5"/></svg>Início
       </button>
@@ -1373,6 +1382,143 @@ function apiErrorToast(e) {
   showToast(e && e.message ? e.message : 'Falha de comunicação com o servidor', 'error');
 }
 
+// ============ OFFLINE: fila de sincronização ============
+// Guarda recibos e despesas lançados sem internet e reenvia ao servidor
+// automaticamente quando a conexão voltar. Usa localStorage (mesmo Storage).
+const SyncQueue = {
+  KEY: 'adm_sync_queue',
+  get() { try { return JSON.parse(localStorage.getItem(this.KEY) || '[]') } catch { return [] } },
+  save(arr) { localStorage.setItem(this.KEY, JSON.stringify(arr)) },
+  count() { return this.get().length },
+  add(item) {
+    const arr = this.get();
+    item.localId = 'q' + Date.now() + Math.random().toString(36).slice(2, 6);
+    item.queuedAt = new Date().toISOString();
+    item.attempts = 0;
+    arr.push(item);
+    this.save(arr);
+    updateSyncBadge();
+    return item.localId;
+  },
+  remove(localId) {
+    this.save(this.get().filter(x => x.localId !== localId));
+    updateSyncBadge();
+  },
+  clear() { this.save([]); updateSyncBadge(); },
+};
+
+// Chamado após gravar um item com sucesso no servidor, para trocar o id local
+// pelo id real em todos os caches de renderização.
+function syncReplaceLocalId(localId, realId) {
+  try {
+    ['adm_receipts', 'adm_expenses', 'adm_service_receipts'].forEach(k => {
+      const arr = Storage.get(k, []);
+      let changed = false;
+      arr.forEach(x => { if (x && x.id === localId) { x.id = realId; changed = true; } });
+      if (changed) Storage.set(k, arr);
+    });
+  } catch (e) { /* ignore */ }
+}
+
+let syncInProgress = false;
+async function syncQueue() {
+  if (syncInProgress) return;
+  const queue = SyncQueue.get();
+  if (!queue.length) return;
+  if (!HAS_FETCH_MODE()) return;
+  if (!isOnline()) return;
+  syncInProgress = true;
+  updateSyncBadge(true);
+  let ok = 0, fail = 0;
+  const remaining = [];
+  for (const item of queue) {
+    try {
+      if (item.kind === 'receipt') {
+        const out = await Api.post('/api/receipts', item.payload);
+        const real = out && out.receipt ? out.receipt : out;
+        if (real && real.id) syncReplaceLocalId(item.localId, real.id);
+        ok++;
+      } else if (item.kind === 'expense') {
+        const out = await Api.post('/api/expenses', item.payload);
+        const real = out && out.expense ? out.expense : out;
+        if (real && real.id) syncReplaceLocalId(item.localId, real.id);
+        ok++;
+      } else {
+        ok++;
+      }
+    } catch (e) {
+      // 4xx = dado inválido/duplicado → descarta para não travar a fila.
+      // 5xx/rede → mantém para tentar de novo.
+      const status = e && e.status;
+      if (status && status >= 400 && status < 500) {
+        console.warn('[SyncQueue] Item rejeitado pelo servidor (descartado):', status, e.message);
+      } else {
+        item.attempts = (item.attempts || 0) + 1;
+        remaining.push(item);
+        fail++;
+      }
+    }
+  }
+  SyncQueue.save(remaining);
+  syncInProgress = false;
+  updateSyncBadge();
+  if (ok > 0) {
+    showToast(ok + (ok === 1 ? ' lançamento sincronizado' : ' lançamentos sincronizados') + (fail ? ` (${fail} pendente(s))` : ''), 'success');
+    try { await syncFinancialData(); } catch (e) { /* ignore */ }
+  }
+  return { ok, fail };
+}
+
+function isOnline() { return typeof navigator === 'undefined' || navigator.onLine !== false; }
+
+function updateSyncBadge(forceBusy) {
+  const el = document.getElementById('syncBadge');
+  if (!el) return;
+  const n = SyncQueue.count();
+  const busy = forceBusy === true || syncInProgress;
+  el.classList.remove('offline', 'pending', 'busy');
+  if (!isOnline()) {
+    el.classList.add('offline');
+    el.textContent = '📴 Offline' + (n ? ` (${n})` : '');
+    el.title = 'Sem internet. Os lançamentos serão enviados automaticamente quando a conexão voltar.';
+  } else if (busy) {
+    el.classList.add('busy');
+    el.textContent = '🔄 Sincronizando...';
+    el.title = 'Enviando lançamentos pendentes ao servidor.';
+  } else if (n > 0) {
+    el.classList.add('pending');
+    el.textContent = `⏳ ${n} pendente` + (n === 1 ? '' : 's');
+    el.title = 'Toque para enviar os lançamentos pendentes agora.';
+  } else {
+    el.textContent = '🟢 Online';
+    el.title = 'Conectado. Todos os lançamentos estão sincronizados.';
+  }
+}
+
+function initOfflineSync() {
+  const badge = document.getElementById('syncBadge');
+  if (badge) badge.onclick = () => { if (isOnline()) syncQueue(); else showToast('Sem internet no momento', 'warning'); };
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('online', () => { updateSyncBadge(); syncQueue(); });
+    window.addEventListener('offline', () => { updateSyncBadge(); showToast('Sem internet — modo offline ativo', 'warning'); });
+  }
+  updateSyncBadge();
+  // Tenta sincronizar pendências que ficaram de sessões anteriores.
+  if (isOnline() && SyncQueue.count() > 0) setTimeout(syncQueue, 1500);
+}
+
+// Registra o service worker (PWA): permite abrir o app sem internet.
+function registerServiceWorker() {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+  if (typeof location !== 'undefined' && location.protocol === 'file:') return;
+  if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').then((reg) => {
+      reg.addEventListener('updatefound', () => { /* nova versão em cache */ });
+    }).catch((e) => { console.warn('[SW] falha ao registrar:', e && e.message); });
+  });
+}
+
 function mapReceipt(r) {
   return {
     id: r.id,
@@ -1589,6 +1735,8 @@ async function afterLogin(user) {
   currentUser = { ...user };
   Storage.setUser(currentUser);
   $('btnLogout').style.display = 'block';
+  if ($('syncBadge')) $('syncBadge').style.display = 'inline-block';
+  updateSyncBadge();
   $('bottombar').style.display = user.role === 'membro' ? 'none' : 'flex';
   updateAdminNav();
 
@@ -1627,6 +1775,16 @@ const SpeechService = {
   finalText: '',
   interimText: '',
   hasProcessed: false,
+  // Tempo de silêncio antes de encerrar a captura (ms). Ampliado para dar tempo
+  // de ditar todos os dados sem que a escuta feche no meio da fala.
+  silenceMs: 20000,
+  // Limite duro de duração da gravação (ms), evita sessão aberta para sempre.
+  maxMs: 180000,
+  maxTimer: null,
+  // Reinicia a escuta automaticamente quando o navegador encerra sozinho
+  // (o Chrome mobile fecha o reconhecimento com frequência).
+  autoRestart: true,
+  stoppedByUser: false,
 
   init() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1647,15 +1805,30 @@ const SpeechService = {
       this.finalText = '';
       this.interimText = '';
       this.hasProcessed = false;
+      this.stoppedByUser = false;
       $('btnVoice').classList.add('recording');
-      $('voiceText').textContent = 'Ouvindo... (fale naturalmente, pausa de 7s para finalizar)';
+      $('voiceText').textContent = 'Ouvindo... (pode falar com calma; para finalizar, toque novamente)';
       this.resetSilenceTimer();
+      this.resetMaxTimer();
     };
 
     this.recognition.onend = () => {
       this.isRecording = false;
       this.clearSilenceTimer();
+      this.clearMaxTimer();
       console.log('[Speech onend] finalText:', JSON.stringify(this.finalText), '| interimText:', JSON.stringify(this.interimText), '| hasProcessed:', this.hasProcessed);
+
+      // Se o navegador encerrou sozinho e o usuário não pediu para parar,
+      // e ainda não processamos nada, reinicia a escuta (mantém a sessão viva).
+      if (!this.hasProcessed && !this.stoppedByUser && this.autoRestart) {
+        console.log('[Speech onend] Encerrado pelo navegador; reiniciando escuta...');
+        setTimeout(() => {
+          if (!this.isRecording && !this.stoppedByUser && !this.hasProcessed) {
+            try { this.recognition.start(); } catch (e) {}
+          }
+        }, 300);
+        return;
+      }
 
       if (!this.hasProcessed) {
         // Prioriza finalText; se vazio, usa interimText (fallback)
@@ -1720,14 +1893,15 @@ const SpeechService = {
     };
   },
 
-  // Timer de silêncio (7 segundos)
+  // Timer de silêncio: encerra a captura só depois de uma pausa longa (padrão 20s)
   resetSilenceTimer() {
     this.clearSilenceTimer();
     this.silenceTimer = setTimeout(() => {
       if (this.isRecording && this.recognition) {
+        this.stoppedByUser = true;
         this.recognition.stop();
       }
-    }, 7000);
+    }, this.silenceMs);
   },
 
   clearSilenceTimer() {
@@ -1737,20 +1911,44 @@ const SpeechService = {
     }
   },
 
+  // Limite duro de duração da sessão de voz (padrão 3 minutos)
+  resetMaxTimer() {
+    this.clearMaxTimer();
+    this.maxTimer = setTimeout(() => {
+      if (this.isRecording && this.recognition) {
+        this.stoppedByUser = true;
+        this.recognition.stop();
+      }
+    }, this.maxMs);
+  },
+
+  clearMaxTimer() {
+    if (this.maxTimer) {
+      clearTimeout(this.maxTimer);
+      this.maxTimer = null;
+    }
+  },
+
   // Interface pública
   start() {
     if (!this.isSupported) return showToast('Reconhecimento de voz não disponível', 'error');
     if (this.isRecording) return this.stop();
+    this.stoppedByUser = false;
     try { this.recognition.start(); } catch (e) { /* já iniciado */ }
   },
 
   stop() {
+    this.stoppedByUser = true;
+    this.clearSilenceTimer();
+    this.clearMaxTimer();
     if (this.recognition) this.recognition.stop();
   },
 
   // Comando de voz: "corrigir" — zera dados e reinicia gravação
   corrigir() {
     this.clearSilenceTimer();
+    this.clearMaxTimer();
+    this.stoppedByUser = true;
     try { this.recognition.abort(); } catch(e) {}
 
     this.isRecording = false;
@@ -1775,6 +1973,7 @@ const SpeechService = {
     // Reinicia gravação automaticamente após 1 segundo
     setTimeout(() => {
       if (!this.isRecording) {
+        this.stoppedByUser = false;
         try { this.recognition.start(); } catch(e) {}
       }
     }, 1000);
@@ -2102,6 +2301,7 @@ async function logout() {
   Storage.clearUser();
   Storage.clearService();
   $('btnLogout').style.display = 'none';
+  if ($('syncBadge')) $('syncBadge').style.display = 'none';
   $('bottombar').style.display = 'none';
   updateAdminNav();
   navigate('screenLogin');
@@ -2510,21 +2710,46 @@ function renderConfirm() {
 
 $('btnRegister').onclick = async () => {
   const person = currentReceipt.person || { name: currentReceipt.name };
+  const payload = {
+    person: { name: person.name, memberCode: person.memberCode ?? null },
+    type: currentReceipt.type,
+    value: currentReceipt.value,
+    payment: normalizeReceiptPayment(currentReceipt.payment),
+    sectorId: selectedSector.id,
+    congregationId: selectedCongregation.id,
+    date: new Date().toISOString(),
+  };
   let saved;
-  if (HAS_FETCH_MODE()) {
+  let queued = false;
+  if (HAS_FETCH_MODE() && isOnline()) {
     try {
-      const out = await Api.post('/api/receipts', {
-        person: { name: person.name, memberCode: person.memberCode ?? null },
-        type: currentReceipt.type,
-        value: currentReceipt.value,
-        payment: normalizeReceiptPayment(currentReceipt.payment),
-        sectorId: selectedSector.id,
-        congregationId: selectedCongregation.id,
-        date: new Date().toISOString(),
-      });
+      const out = await Api.post('/api/receipts', payload);
       saved = mapReceipt(out.receipt);
-    } catch (e) { return apiErrorToast(e); }
-  } else {
+    } catch (e) {
+      // Falha de rede (offline inesperado) → enfileira em vez de perder o recibo.
+      if (!e || !e.status) { queued = true; } else { return apiErrorToast(e); }
+    }
+  } else if (HAS_FETCH_MODE()) {
+    queued = true;
+  }
+  if (queued) {
+    saved = {
+      id: SyncQueue.add({ kind: 'receipt', payload }),
+      number: generateReceiptNumber(),
+      person: { name: person.name, memberCode: person.memberCode ?? null, congregationId: selectedCongregation.id },
+      type: currentReceipt.type,
+      value: currentReceipt.value,
+      payment: payload.payment,
+      sectorId: selectedSector.id,
+      congregationId: selectedCongregation.id,
+      date: payload.date,
+      status: 'confirmado',
+      pending: true,
+      createdById: currentUser?.id ?? null,
+      createdByName: currentUser?.name ?? '',
+      createdByEmail: currentUser?.email ?? '',
+    };
+  } else if (!saved) {
     saved = {
       id: Date.now(),
       number: generateReceiptNumber(),
@@ -2544,7 +2769,7 @@ $('btnRegister').onclick = async () => {
   Storage.saveReceipt(saved);
   Storage.saveServiceReceipt(saved);
   serviceReceipts.push(saved);
-  showToast('Recebimento registrado!', 'success');
+  showToast(queued ? 'Sem internet — recibo salvo no aparelho e será enviado depois' : 'Recebimento registrado!', queued ? 'warning' : 'success');
   navigate('screenReceipt');
   renderReceipt(saved);
 };
@@ -3663,18 +3888,37 @@ $('btnAddExpense')?.addEventListener('click', async () => {
   }
 
   let exp;
-  if (HAS_FETCH_MODE()) {
+  let queued = false;
+  const expPayload = {
+    date: new Date(dateVal + 'T12:00:00').toISOString(),
+    category, description, value,
+    payment: $('expPayment')?.value || 'dinheiro',
+    sectorId, congregationId,
+    comprovante: currentComprovante,
+  };
+  if (HAS_FETCH_MODE() && isOnline()) {
     try {
-      const out = await Api.post('/api/expenses', {
-        date: new Date(dateVal + 'T12:00:00').toISOString(),
-        category, description, value,
-        payment: $('expPayment')?.value || 'dinheiro',
-        sectorId, congregationId,
-        comprovante: currentComprovante,
-      });
+      const out = await Api.post('/api/expenses', expPayload);
       exp = mapExpense(out.expense);
-    } catch (e) { return apiErrorToast(e); }
-  } else {
+    } catch (e) {
+      if (!e || !e.status) { queued = true; } else { return apiErrorToast(e); }
+    }
+  } else if (HAS_FETCH_MODE()) {
+    queued = true;
+  }
+  if (queued) {
+    exp = {
+      id: SyncQueue.add({ kind: 'expense', payload: expPayload }),
+      date: expPayload.date,
+      category, description, value,
+      payment: expPayload.payment,
+      sectorId, congregationId,
+      comprovante: currentComprovante,
+      pending: true,
+      createdBy: currentUser.name,
+      createdAt: new Date().toISOString(),
+    };
+  } else if (!exp) {
     exp = {
       id: String(Date.now()) + Math.random().toString(36).slice(2, 6),
       date: new Date(dateVal + 'T12:00:00').toISOString(),
@@ -3692,7 +3936,7 @@ $('btnAddExpense')?.addEventListener('click', async () => {
   $('expDesc').value = '';
   if ($('expPayment')) $('expPayment').value = 'dinheiro';
   resetComprovante();
-  showToast('Despesa lançada!', 'success');
+  showToast(queued ? 'Sem internet — despesa salva no aparelho e será enviada depois' : 'Despesa lançada!', queued ? 'warning' : 'success');
 
   // Verifica limite de 40% da semana para a congregação da despesa
   const sums = weekSumsFor(scopeCong(sectorId, congregationId), weekStartDate(exp.date));
@@ -5728,6 +5972,8 @@ navigate = function(screenId) {
 // INIT
 async function init() {
   initSpeech();
+  initOfflineSync();
+  registerServiceWorker();
   let savedUser = Storage.getUser();
   if (savedUser && ROLE_HIERARCHY[savedUser.role] && HAS_FETCH_MODE()) {
     try {

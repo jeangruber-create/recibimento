@@ -98,6 +98,24 @@ if (config.frontFile) {
   };
   app.get('/', sendIndex);
   app.get('/index.html', sendIndex);
+
+  // ---- PWA: manifest, service worker e ícones (ficam ao lado do index.html) ----
+  const path = require('path');
+  const frontDir = path.dirname(config.frontFile);
+  const staticFiles = {
+    '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'],
+    '/sw.js': ['sw.js', 'application/javascript; charset=utf-8'],
+    '/icons/icon-192.png': ['icons/icon-192.png', 'image/png'],
+    '/icons/icon-512.png': ['icons/icon-512.png', 'image/png'],
+  };
+  Object.entries(staticFiles).forEach(([route, [file, type]]) => {
+    app.get(route, (req, res) => {
+      const full = path.join(frontDir, file);
+      if (!fs.existsSync(full)) return res.status(404).send('Not found');
+      const cache = route === '/sw.js' ? 'no-cache' : 'public, max-age=86400';
+      res.set('Content-Type', type).set('Cache-Control', cache).send(fs.readFileSync(full));
+    });
+  });
 }
 
 app.use(notFound);

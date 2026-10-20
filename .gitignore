@@ -3,6 +3,9 @@
 !/index.html
 !/README.md
 !/render.yaml
+!/manifest.webmanifest
+!/sw.js
+!/icons/
 !/backend/
 !/neon.ts
 !/.neon

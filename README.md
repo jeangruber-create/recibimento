@@ -56,6 +56,8 @@ Depois abra `http://localhost:8080/index.html` (o front detecta a API em `http:/
 - **Portal do membro (autocadastro)**: o fiel cria a própria conta em **"Sou membro — quero me cadastrar"** na tela de login, informando **nome completo, CPF, CEP, número da residência e celular** (mais e-mail e senha). Esses dados alimentam os demais módulos. Após o cadastro, o sistema confirma o celular por um **código de 6 dígitos**. O membro ganha um **código único (ADMxxxxxx)** e um QR code.
 - **Senha do fiel**: é definida pelo próprio membro no autocadastro. Se perder, **somente o admin** redefine (`🔑` na lista de usuários), gerando uma **senha temporária** que o fiel troca no 1º acesso.
 - **Agradecimento por WhatsApp**: ao registrar um recibo, se o contribuinte for identificado por **código de membro ou CPF**, o botão **"Agradecer por WhatsApp"** abre o `wa.me` com uma mensagem de agradecimento personalizada (sem custo de API). O coletor também pode buscar o membro por nome, código ou CPF.
+- **Ditado de voz (coleta)**: o reconhecimento de fala usa **20 s de silêncio** antes de encerrar (configurável em `SpeechService.silenceMs`), com **limite de 3 min** por sessão e **religamento automático** quando o navegador (comum no Chrome do celular) encerra a escuta sozinho. Assim o coletor pode ditar os dados com calma, sem o ditado fechar no meio.
+- **Uso offline (PWA)**: o app é instalável (manifest + service worker) e abre sem internet. Sem conexão, **recibos e despesas** são gravados numa **fila de sincronização** local e enviados automaticamente quando a internet volta (ou manualmente, tocando no indicador no topo). O badge no topo mostra o estado: `🟢 Online`, `⏳ N pendentes` ou `📴 Offline (N)`.
 
 
 ### 4.1 Matriz de permissões por perfil
@@ -109,6 +111,13 @@ Com o backend no ar, rode o teste de integração:
 ```powershell
 $env:Path = "C:\Program Files\nodejs;" + $env:Path
 node "$env:TEMP\opencode\apitest.mjs" "index.html"   # 117/117
+```
+
+Testes do modo offline/PWA (não precisam da API para o `offlinetest`):
+
+```powershell
+node "$env:TEMP\offlinetest.mjs" "index.html"        # 10/10  (fila offline: add/remove/badge/id local)
+node "$env:TEMP\draintest.mjs"  "index.html"         # 7/7    (drena a fila para o servidor e troca o id)
 ```
 
 O teste reproduz o cookie http-only num jar próprio, então cobre o fluxo real de sessão. A suíte
