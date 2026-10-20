@@ -5,7 +5,7 @@ const { authRequired } = require('../middleware/auth');
 const { httpError } = require('../middleware/error');
 const { closure: serializeClosure } = require('../lib/serialize');
 const { resolveWeekStart, weekBounds, EXPENSE_LIMIT_RATIO } = require('../lib/week');
-const { weekSums } = require('../lib/weekly');
+const { weekSums, CONFIRMED_RECEIPT } = require('../lib/weekly');
 const { logAudit } = require('../lib/audit');
 
 const router = express.Router();
@@ -84,7 +84,7 @@ router.get('/summary', async (req, res, next) => {
       include: { congregations: { orderBy: { name: 'asc' } } },
     });
     const [receipts, expenses, closures] = await Promise.all([
-      prisma.receipt.findMany({ where: { date: { gte: start, lte: end } }, select: { sectorId: true, congregationId: true, value: true } }),
+      prisma.receipt.findMany({ where: { ...CONFIRMED_RECEIPT, date: { gte: start, lte: end } }, select: { sectorId: true, congregationId: true, value: true } }),
       prisma.expense.findMany({ where: { date: { gte: start, lte: end } }, select: { sectorId: true, congregationId: true, value: true } }),
       prisma.weekClosure.findMany({ where: { weekStart } }),
     ]);

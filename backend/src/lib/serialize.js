@@ -51,6 +51,9 @@ function receipt(r) {
     createdById: r.createdById ?? null,
     date: iso(r.date),
     status: r.status,
+    source: r.source ?? null,
+    confirmedAt: r.confirmedAt ? iso(r.confirmedAt) : null,
+    confirmedByEmail: r.confirmedByEmail ?? null,
   };
 }
 

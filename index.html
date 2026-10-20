@@ -1100,7 +1100,7 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
         </div>
         <div class="form-group" style="flex:1;">
           <label class="form-label">Valor (R$)</label>
-          <input type="text" class="form-input" id="memGiveValue" inputmode="decimal" placeholder="0,00">
+          <input type="text" class="form-input" id="memGiveValue" inputmode="decimal" placeholder="0,00" oninput="renderMemberGive()">
         </div>
       </div>
       <div class="form-group">
@@ -1108,7 +1108,7 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
         <input type="text" class="form-input" id="memGiveNote" placeholder="Ex.: dízimo do mês">
       </div>
       <button class="btn btn-primary" style="width:100%;" onclick="submitMemberGive()">Registrar meu dízimo/oferta</button>
-      <p style="font-size:12px; color:var(--text-muted); margin-top:8px; line-height:1.5;">Ao registrar, seu dízimo/oferta entra no sistema da sua congregação. Faça o PIX usando a chave acima.</p>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:8px; line-height:1.5;">1) Faça o PIX pelo QR Code ou copia-e-cola acima. 2) Toque em “Registrar meu dízimo/oferta”. A tesouraria confirma o recebimento e o valor entra nos totais da congregação.</p>
     </div>
 
     <div class="card member-card">
@@ -1579,6 +1579,9 @@ function mapReceipt(r) {
     createdByEmail: r.createdByEmail ?? '',
     date: r.date,
     status: r.status,
+    source: r.source ?? null,
+    confirmedAt: r.confirmedAt ?? null,
+    confirmedByEmail: r.confirmedByEmail ?? null,
   };
 }
 
@@ -2819,6 +2822,13 @@ $('btnRegister').onclick = async () => {
 
 // RECEIPT
 function renderReceipt(r) {
+  const sec = (typeof selectedSector !== 'undefined' && selectedSector) ? selectedSector : sectorsData.find(s => s.id === r.sectorId);
+  const cong = (typeof selectedCongregation !== 'undefined' && selectedCongregation) ? selectedCongregation : (sec?.congregations.find(c => c.id === r.congregationId));
+  const pend = isPendingReceipt(r);
+  const canConfirm = pend && canConfirmReceipt(r);
+  const statusRow = pend
+    ? `<div class="receipt-row"><span>Situação:</span><strong style="color:var(--warning);">Aguardando confirmação do PIX</strong></div>`
+    : `<div class="receipt-row"><span>Situação:</span><strong style="color:var(--success);">Confirmado</strong></div>`;
   const html = `
     <div class="receipt-header">
       <div class="receipt-title">ASSEMBLEIA DE DEUS MISSÕES</div>
@@ -2829,14 +2839,16 @@ function renderReceipt(r) {
       <div class="receipt-row"><span>Recebemos de:</span><strong>${r.person.name}</strong></div>
       <div class="receipt-row"><span>Referente a:</span><strong>${r.type}</strong></div>
       <div class="receipt-row"><span>Valor:</span><strong>${fmtMoney(r.value)}</strong></div>
-      <div class="receipt-row"><span>Setor:</span><strong>${String(selectedSector.id).padStart(2,'0')}</strong></div>
-      <div class="receipt-row"><span>Congregação:</span><strong>${selectedCongregation.code}</strong></div>
+      <div class="receipt-row"><span>Setor:</span><strong>${sec ? String(sec.id).padStart(2,'0') : '—'}</strong></div>
+      <div class="receipt-row"><span>Congregação:</span><strong>${cong ? cong.code : '—'}</strong></div>
       <div class="receipt-row"><span>Data:</span><strong>${fmtDate(new Date(r.date))}</strong></div>
       <div class="receipt-row"><span>Hora:</span><strong>${fmtTime(new Date(r.date))}</strong></div>
+      ${statusRow}
     </div>
     <div class="receipt-total receipt-row">
       <span>Total</span><strong>${fmtMoney(r.value)}</strong>
     </div>
+    ${canConfirm ? `<button class="btn btn-primary" style="width:100%; margin:12px 0 8px;" onclick="confirmReceiptPixAndReload('${r.id}')">Confirmar recebimento do PIX</button>` : ''}
     <div class="receipt-footer">
       Agradecemos sua contribuição.<br>
       Este recibo poderá ser consultado posteriormente.
@@ -3601,6 +3613,11 @@ function getScopedReceipts() {
   return [];
 }
 
+// Recibos pendentes (dízimo/oferta de membro aguardando confirmação) não entram nos totais.
+function isPendingReceipt(r) { return r && r.status === 'pendente'; }
+// Lista de recibos que devem entrar nos totais (exclui pendentes).
+function confirmedOnly(list) { return (list || []).filter(r => !isPendingReceipt(r)); }
+
 // Despesas com o mesmo escopo de visão dos recebimentos
 function getScopedExpenses() {
   let all = Storage.getExpenses();
@@ -3630,7 +3647,7 @@ function stopDayPanelAutoRefresh() {
 function renderDayPanel() {
   const start = new Date(); start.setHours(0, 0, 0, 0);
   const end = new Date(); end.setHours(23, 59, 59, 999);
-  const list = getScopedReceipts().filter(r => {
+  const list = confirmedOnly(getScopedReceipts()).filter(r => {
     const t = new Date(r.date).getTime();
     return t >= start.getTime() && t <= end.getTime();
   });
@@ -3722,7 +3739,7 @@ function renderWeeklyCloseRaw() {
   $('weekLabel').textContent = `${start.toLocaleDateString('pt-BR')} a ${end.toLocaleDateString('pt-BR')}`;
 
   const inRange = (d) => { const t = new Date(d).getTime(); return t >= start.getTime() && t <= end.getTime(); };
-  const receipts = getScopedReceipts().filter(r => inRange(r.date));
+  const receipts = confirmedOnly(getScopedReceipts()).filter(r => inRange(r.date));
   const expenses = getScopedExpenses().filter(e => inRange(e.date));
 
   const income = receipts.reduce((s, r) => s + r.value, 0);
@@ -4027,7 +4044,7 @@ function exportWeeklyExcel() {
   if (typeof XLSX === 'undefined') return showToast('Biblioteca Excel não carregada', 'error');
   const { start, end } = getWeekRange();
   const inRange = (d) => { const t = new Date(d).getTime(); return t >= start.getTime() && t <= end.getTime(); };
-  const receipts = getScopedReceipts().filter(r => inRange(r.date));
+  const receipts = confirmedOnly(getScopedReceipts()).filter(r => inRange(r.date));
   const expenses = getScopedExpenses().filter(e => inRange(e.date));
   const income = receipts.reduce((s, r) => s + r.value, 0);
   const expenseTotal = expenses.reduce((s, e) => s + e.value, 0);
@@ -4073,6 +4090,7 @@ function exportWeeklyExcel() {
     ['RECEITAS POR TIPO', 'Valor (R$)'],
     ...Object.entries(byType).map(([t, v]) => [t, v]),
     ['TOTAL RECEITAS', income],
+    ['↳ Dízimos/ofertas de casa (membros)', receipts.filter(r => r.source === 'membro').reduce((s,r)=>s+r.value,0)],
     [],
     ['DESPESAS POR CATEGORIA', 'Valor (R$)'],
     ...Object.entries(byCat).map(([c, v]) => [c, v]),
@@ -4098,7 +4116,7 @@ function exportWeeklyExcel() {
 function printWeekly() {
   const { start, end } = getWeekRange();
   const inRange = (d) => { const t = new Date(d).getTime(); return t >= start.getTime() && t <= end.getTime(); };
-  const receipts = getScopedReceipts().filter(r => inRange(r.date));
+  const receipts = confirmedOnly(getScopedReceipts()).filter(r => inRange(r.date));
   const expenses = getScopedExpenses().filter(e => inRange(e.date));
   const income = receipts.reduce((s, r) => s + r.value, 0);
   const expenseTotal = expenses.reduce((s, e) => s + e.value, 0);
@@ -4242,7 +4260,7 @@ function renderDashboard() {
 }
 
 function applyDashFilters() {
-  let list = getScopedReceipts();
+  let list = confirmedOnly(getScopedReceipts());
 
   const from = $('dashDateFrom').value;
   const to = $('dashDateTo').value;
@@ -4534,15 +4552,84 @@ function renderMemberGive() {
       </div>`;
     return;
   }
+  const code = pixBRCode({
+    key: pixKey,
+    name: (cong?.name || currentUser?.congregationName || 'ADM Missoes'),
+    city: 'CIDADE',
+    amount: parseFloat(($('memGiveValue')?.value || '').replace(/\./g, '').replace(',', '.')),
+    txid: 'ADM' + (currentUser?.memberCode || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 20),
+  });
+  window.__memberPixCode = code;
   box.innerHTML = `
     <div style="border:1px solid var(--border); border-radius:8px; padding:12px; background:#F5F5F0;">
       <div style="font-size:12px; color:var(--text-muted);">PIX da congregação ${congName}${pixKeyType ? ' (' + pixKeyType + ')' : ''}</div>
       <div style="display:flex; align-items:center; gap:8px; margin-top:4px;">
         <code id="memberPixValue" style="flex:1; font-size:15px; font-weight:600; color:var(--primary); word-break:break-all;">${pixKey}</code>
-        <button class="btn btn-ghost" style="padding:6px 10px; white-space:nowrap;" onclick="copyMemberPix()">Copiar</button>
+        <button class="btn btn-ghost" style="padding:6px 10px; white-space:nowrap;" onclick="copyMemberPix()">Copiar chave</button>
       </div>
+      <div id="memberPixQr" style="display:flex; justify-content:center; margin-top:10px;"></div>
+      <button class="btn btn-ghost" style="width:100%; margin-top:8px; font-size:13px;" onclick="copyMemberPixCode()">Copiar PIX copia-e-cola (com valor)</button>
     </div>`;
+  const qr = $('memberPixQr');
+  if (qr) {
+    if (typeof QRCode === 'undefined') {
+      qr.innerHTML = '<div style="font-size:12px; color:var(--text-muted);">QR indisponível offline — use o copia-e-cola.</div>';
+    } else {
+      qr.innerHTML = '';
+      new QRCode(qr, { text: code, width: 168, height: 168, colorDark: '#1a1a1a', colorLight: '#ffffff' });
+    }
+  }
 }
+
+// ---- PIX BR Code (EMV® QRCPS-MPM) — gera o "copia-e-cola" a partir da chave ----
+function pixField(id, value) {
+  const v = String(value ?? '');
+  return id + String(v.length).padStart(2, '0') + v;
+}
+function pixSanitize(s, max) {
+  return String(s == null ? '' : s)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9 .\-]/g, '')
+    .trim().slice(0, max);
+}
+function pixCRC16(payload) {
+  let crc = 0xFFFF;
+  for (let i = 0; i < payload.length; i++) {
+    crc ^= payload.charCodeAt(i) << 8;
+    for (let j = 0; j < 8; j++) crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) & 0xFFFF : (crc << 1) & 0xFFFF;
+  }
+  return crc.toString(16).toUpperCase().padStart(4, '0');
+}
+function pixBRCode({ key, name, city, amount, txid }) {
+  const gui = pixField('00', 'br.gov.bcb.pix');
+  let merchant = pixField('26', gui + pixField('01', String(key || '').trim()));
+  const amountStr = (amount && amount > 0) ? Number(amount).toFixed(2) : '';
+  const tx = pixSanitize(txid || '***', 25).replace(/\s/g, '') || '***';
+  let payload =
+    pixField('00', '01') +
+    pixField('01', '12') +
+    merchant +
+    pixField('52', '0000') +
+    pixField('53', '986') +
+    (amountStr ? pixField('54', amountStr) : '') +
+    pixField('58', 'BR') +
+    pixField('59', pixSanitize(name || 'RECEBEDOR', 25).toUpperCase() || 'RECEBEDOR') +
+    pixField('60', pixSanitize(city || 'CIDADE', 15).toUpperCase() || 'CIDADE') +
+    pixField('62', pixField('05', tx)) +
+    '6304';
+  return payload + pixCRC16(payload);
+}
+
+function copyMemberPixCode() {
+  const code = window.__memberPixCode || '';
+  if (!code) return showToast('Chave PIX não cadastrada', 'error');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(code).then(() => showToast('PIX copia-e-cola copiado', 'success')).catch(() => showToast('Copie manualmente: ' + code, 'info'));
+  } else {
+    showToast('Copie o código: ' + code, 'info');
+  }
+}
+
 
 function copyMemberPix() {
   const el = $('memberPixValue');
@@ -4590,7 +4677,7 @@ async function submitMemberGive() {
       person: { name: currentUser.name, memberCode: currentUser.memberCode, congregationId: currentUser.congregationId },
       type: payload.type, value, payment: 'pix',
       sectorId: currentUser.sectorId, congregationId: currentUser.congregationId,
-      date: payload.date, status: 'confirmado', pending: true,
+      date: payload.date, status: 'pendente', source: 'membro', pending: true,
       createdById: currentUser.id ?? null, createdByName: currentUser.name ?? '', createdByEmail: currentUser.email ?? '',
     };
   }
@@ -4599,7 +4686,8 @@ async function submitMemberGive() {
   }
   $('memGiveValue').value = '';
   $('memGiveNote').value = '';
-  showToast(queued ? 'Sem internet — registrado no aparelho e será enviado depois' : 'Dízimo/oferta registrado!', queued ? 'warning' : 'success');
+  showToast(queued ? 'Sem internet — registrado no aparelho e será enviado depois' : 'Dízimo/oferta registrado! Aguardando confirmação da tesouraria.', queued ? 'warning' : 'success');
+  renderMemberGive();
   renderMemberReceipts();
 }
 
@@ -4621,7 +4709,10 @@ function renderMemberQR(code) {
 }
 
 function renderMemberReceipts() {
-  const list = getScopedReceipts().sort((a,b) => new Date(b.date) - new Date(a.date));
+  const all = getScopedReceipts().sort((a,b) => new Date(b.date) - new Date(a.date));
+  const isPending = r => r.status === 'pendente';
+  const list = all.filter(r => !isPending(r));
+  const pend = all.filter(isPending);
   const total = list.reduce((s,r) => s + r.value, 0);
   const diz = list.filter(r => (r.type || '').startsWith('Dízimo')).reduce((s,r) => s + r.value, 0);
   const ofe = list.filter(r => (r.type || '').startsWith('Oferta')).reduce((s,r) => s + r.value, 0);
@@ -4631,21 +4722,38 @@ function renderMemberReceipts() {
   $('memOferta').textContent = fmtMoney(ofe);
 
   const el = $('memberReceipts');
-  if (!list.length) {
+  if (!all.length) {
     el.innerHTML = '<div style="color:var(--text-muted); font-size:14px; text-align:center; padding:16px;">Nenhum registro ainda</div>';
     return;
   }
-  el.innerHTML = list.map(r => {
-    const d = new Date(r.date);
-    const dateStr = d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    return `<div class="list-item">
-      <div class="list-item-info">
-        <div class="list-item-title">${r.type}</div>
-        <div class="list-item-sub">${dateStr}</div>
-      </div>
-      <span class="list-item-badge" style="background:var(--success); color:white;">${fmtMoney(r.value)}</span>
-    </div>`;
-  }).join('');
+  if (pend.length) {
+    const pendTotal = pend.reduce((s,r) => s + r.value, 0);
+    el.innerHTML = `<div style="border:1px solid var(--warning); border-radius:8px; padding:10px; background:#FFF7E6; margin-bottom:10px;">
+      <div style="font-size:13px; color:var(--warning); font-weight:600;">${pend.length} registro(s) aguardando confirmação da tesouraria — ${fmtMoney(pendTotal)}</div>
+      <div style="font-size:12px; color:var(--text-muted); margin-top:2px;">Ainda não entram nos totais. Serão somados assim que o PIX for confirmado.</div>
+    </div>` + all.map(r => memberReceiptRow(r)).join('');
+    return;
+  }
+  el.innerHTML = all.map(r => memberReceiptRow(r)).join('');
+}
+
+function memberReceiptRow(r) {
+  const d = new Date(r.date);
+  const dateStr = d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const pend = r.status === 'pendente';
+  const badge = pend
+    ? '<span class="list-item-badge" style="background:#FFF3CD; color:#8a6d00; border:1px solid #F0D48A;">Pendente</span>'
+    : '<span class="list-item-badge" style="background:var(--success); color:white;">Confirmado</span>';
+  return `<div class="list-item" ${pend ? 'style="opacity:0.85;"' : ''}>
+    <div class="list-item-info">
+      <div class="list-item-title">${r.type}</div>
+      <div class="list-item-sub">${dateStr}</div>
+    </div>
+    <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+      <span class="list-item-badge" style="background:transparent; color:var(--text); font-weight:600;">${fmtMoney(r.value)}</span>
+      ${badge}
+    </div>
+  </div>`;
 }
 
 function renderDashKPIs(filtered) {
@@ -4826,19 +4934,27 @@ function exportDashboardExcel() {
   const expenses = canViewExpenses(currentUser) ? applyDashExpenseFilters() : [];
   if (filtered.length === 0 && expenses.length === 0) return showToast('Nenhum dado para exportar', 'warning');
 
-  const header = ['Nº Recibo', 'Data', 'Hora', 'Pessoa', 'Tipo', 'Valor (R$)', 'Setor', 'Congregação', 'Status'];
+  const header = ['Nº Recibo', 'Data', 'Hora', 'Pessoa', 'Tipo', 'Valor (R$)', 'Setor', 'Congregação', 'Origem', 'Status'];
   const rows = filtered.map(r => {
     const s = sectorsData.find(x => x.id === r.sectorId);
     const c = s?.congregations.find(x => x.id === r.congregationId);
     const d = new Date(r.date);
     return [r.number, fmtDate(d), fmtTime(d), r.person?.name || '', r.type, r.value,
       s ? `${String(s.id).padStart(2,'0')} - ${s.name}` : String(r.sectorId),
-      c ? `${c.code} - ${c.name}` : String(r.congregationId), r.status || 'confirmado'];
+      c ? `${c.code} - ${c.name}` : String(r.congregationId),
+      r.source === 'membro' ? 'Membro (casa)' : 'Coleta', r.status || 'confirmado'];
   });
+  // Linha de destaque dos dízimos/ofertas de casa
+  const memberRecs = filtered.filter(r => r.source === 'membro');
+  if (memberRecs.length) {
+    const mTotal = memberRecs.reduce((s, r) => s + r.value, 0);
+    rows.push([]);
+    rows.push(['Dízimos/ofertas de casa (membros)', '', '', `${memberRecs.length} registro(s)`, '', mTotal, '', '', 'Membro (casa)', 'resumo']);
+  }
 
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
-  ws['!cols'] = [{wch:12},{wch:12},{wch:8},{wch:30},{wch:22},{wch:14},{wch:22},{wch:25},{wch:14}];
+  ws['!cols'] = [{wch:12},{wch:12},{wch:8},{wch:30},{wch:22},{wch:14},{wch:22},{wch:25},{wch:15},{wch:14}];
   XLSX.utils.book_append_sheet(wb, ws, 'Recebimentos');
 
   // Aba de Despesas (quando o perfil tem visibilidade)
@@ -4883,6 +4999,7 @@ function exportDashboardSummaryExcel() {
     ['Responsável:', currentUser?.name || ''],
     [],
     ['TOTAL RECEBIDO', filtered.length, total],
+    (() => { const mr = filtered.filter(r => r.source === 'membro'); return ['↳ Dízimos/ofertas de casa (membros)', mr.length, mr.reduce((s,r)=>s+r.value,0)]; })(),
     ...(canViewExpenses(currentUser) ? [
       ['TOTAL DESPESAS', expenses.length, expTotal],
       ['SALDO (Recebido - Despesas)', '', total - expTotal]
@@ -4946,6 +5063,7 @@ function printDashboard() {
       <div><strong>Total Recebido:</strong> ${fmtMoney(total)}</div>
       <div><strong>Recibos:</strong> ${filtered.length}</div>
       <div><strong>Ticket Médio:</strong> ${fmtMoney(filtered.length ? total/filtered.length : 0)}</div>
+      ${(() => { const mr = filtered.filter(r => r.source === 'membro'); return mr.length ? `<div style="color:#1B3A5C;"><strong>Dízimos/ofertas de casa:</strong> ${fmtMoney(mr.reduce((s,r)=>s+r.value,0))} (${mr.length})</div>` : ''; })()}
       ${showExp ? `<div class="exp"><strong>Total Despesas:</strong> ${fmtMoney(expTotal)}</div>
       <div class="bal" style="font-size:14px; display:inline-block; margin:0 0 0 20px;">Saldo: ${fmtMoney(total - expTotal)}</div>` : ''}
     </div>
@@ -4953,12 +5071,12 @@ function printDashboard() {
       ${Object.entries(byType).map(([t,v]) => `<div><strong>${t}:</strong> ${fmtMoney(v)}</div>`).join('')}
     </div>
     <table>
-      <thead><tr><th>Recibo</th><th>Data</th><th>Pessoa</th><th>Tipo</th><th>Setor/Cong</th><th class="right">Valor</th></tr></thead>
+      <thead><tr><th>Recibo</th><th>Data</th><th>Pessoa</th><th>Tipo</th><th>Setor/Cong</th><th>Origem</th><th class="right">Valor</th></tr></thead>
       <tbody>
         ${filtered.map(r => {
           const s = sectorsData.find(x => x.id === r.sectorId);
           const c = s?.congregations.find(x => x.id === r.congregationId);
-          return `<tr><td>${r.number}</td><td>${fmtDate(new Date(r.date))}</td><td>${r.person?.name||''}</td><td>${r.type}</td><td>${s?String(s.id).padStart(2,'0'):''}/${c?c.code:''}</td><td class="right">${fmtMoney(r.value)}</td></tr>`;
+          return `<tr><td>${r.number}</td><td>${fmtDate(new Date(r.date))}</td><td>${r.person?.name||''}</td><td>${r.type}</td><td>${s?String(s.id).padStart(2,'0'):''}/${c?c.code:''}</td><td>${r.source === 'membro' ? 'Membro (casa)' : 'Coleta'}</td><td class="right">${fmtMoney(r.value)}</td></tr>`;
         }).join('')}
       </tbody>
     </table>
@@ -5031,7 +5149,7 @@ function sumValues(obj) { return Object.values(obj).reduce((a, b) => a + b, 0); 
 function weekSumsFor(scopeFilter, anyDateInWeek) {
   const { start, end } = weekBounds(weekStartDate(anyDateInWeek));
   const inR = (d) => { const t = new Date(d).getTime(); return t >= start.getTime() && t <= end.getTime(); };
-  const income = Storage.getReceipts().filter(r => inR(r.date) && scopeFilter(r)).reduce((s, r) => s + r.value, 0);
+  const income = confirmedOnly(Storage.getReceipts().filter(r => inR(r.date) && scopeFilter(r))).reduce((s, r) => s + r.value, 0);
   const expense = Storage.getExpenses().filter(e => inR(e.date) && scopeFilter(e)).reduce((s, e) => s + e.value, 0);
   const ratio = income > 0 ? expense / income : (expense > 0 ? 1 : 0);
   return { income, expense, balance: income - expense, ratio, exceeded: expense > income * EXPENSE_LIMIT_RATIO };
@@ -5275,7 +5393,7 @@ const PRESTACAO_TOLERANCE = 0.01;
 function prestacaoComputed(sectorId, anyDateInWeek) {
   const { start, end } = weekBounds(weekStartDate(anyDateInWeek));
   const inR = (d) => { const t = new Date(d).getTime(); return t >= start.getTime() && t <= end.getTime(); };
-  const recs = Storage.getReceipts().filter(r => inR(r.date) && r.sectorId === sectorId);
+  const recs = confirmedOnly(Storage.getReceipts().filter(r => inR(r.date) && r.sectorId === sectorId));
   const exps = Storage.getExpenses().filter(e => inR(e.date) && e.sectorId === sectorId);
   const incomeBy = sumByPayment(recs, receiptPayment);
   const expenseBy = sumByPayment(exps, expensePayment);
@@ -5287,11 +5405,18 @@ function prestacaoComputed(sectorId, anyDateInWeek) {
   const pixExpense = expenseBy.pix || 0;
   const otherIncome = incomeBy.outros || 0;
   const otherExpense = expenseBy.outros || 0;
+  // Dízimos/ofertas de casa registrados pelos próprios membros (destacar na prestação)
+  const memberRecs = recs.filter(r => r.source === 'membro');
+  const memberIncome = memberRecs.reduce((s, r) => s + r.value, 0);
+  const memberPixIncome = memberRecs.filter(r => receiptPayment(r) === 'pix').reduce((s, r) => s + r.value, 0);
+  const memberDizimo = memberRecs.filter(r => (r.type || '').toLowerCase().startsWith('dízimo')).reduce((s, r) => s + r.value, 0);
+  const memberOferta = memberRecs.filter(r => (r.type || '').toLowerCase().startsWith('oferta')).reduce((s, r) => s + r.value, 0);
   return {
     start, end, income, expense, balance: income - expense, incomeBy, expenseBy,
     cashIncome, cashExpense, expectedCash: cashIncome - cashExpense,
     pixIncome, pixExpense, otherIncome, otherExpense,
-    pixNet: pixIncome - pixExpense
+    pixNet: pixIncome - pixExpense,
+    memberIncome, memberPixIncome, memberDizimo, memberOferta
   };
 }
 
@@ -5568,12 +5693,18 @@ function renderPrestacaoPanel() {
     const computedTable = `<table style="width:100%; border-collapse:collapse; font-size:13px;">
       ${flowRow('Entradas — Dinheiro', computed.cashIncome)}
       ${flowRow('Entradas — PIX/POS', computed.pixIncome)}
+      ${computed.memberIncome ? flowRow('↳ Dízimos/ofertas de casa (inclusos no PIX)', computed.memberIncome, 'var(--primary)') : ''}
       ${computed.otherIncome ? flowRow('Entradas — Outras', computed.otherIncome) : ''}
       ${flowRow('(−) Saídas — Dinheiro', computed.cashExpense, 'var(--error)')}
       ${flowRow('(−) Saídas — PIX/Outros', computed.pixExpense + computed.otherExpense, 'var(--error)')}
       <tr style="border-top:1px solid #eee;"><td style="padding-top:6px; font-weight:700;">Caixa esperado (dinheiro)</td><td style="text-align:right; padding-top:6px; font-weight:700;">${fmtMoney(computed.expectedCash)}</td></tr>
       <tr><td style="font-weight:700;">PIX/POS líquido esperado</td><td style="text-align:right; font-weight:700;">${fmtMoney(computed.pixNet)}</td></tr>
-    </table>`;
+    </table>
+    ${computed.memberIncome ? `<div style="margin-top:8px; border:1px solid var(--primary); border-radius:8px; padding:8px; background:#EEF3F8; font-size:12px;">
+      <strong>Dízimos e ofertas de casa (membros):</strong> ${fmtMoney(computed.memberIncome)}
+      — Dízimos ${fmtMoney(computed.memberDizimo)} • Ofertas ${fmtMoney(computed.memberOferta)}
+      <div style="color:var(--text-muted); margin-top:2px;">Recebidos por PIX de casa e já confirmados pela tesouraria; incluídos nas entradas acima.</div>
+    </div>` : ''}`;
 
     let proofsHtml = `<div style="margin-top:10px;">
       <div style="font-size:12px; color:var(--text-muted);">Comprovante do repasse em dinheiro (opcional)</div>`;
@@ -5633,9 +5764,11 @@ function renderPrestacaoPanel() {
   // ---- sede: conferência e validação ----
   let rows = '';
   let pendingCount = 0;
+  let memberTotalAll = 0;
   sectorsData.forEach(sec => {
     const c = prestacaoComputed(sec.id, week);
     const p = getPrestacao(sec.id, week);
+    memberTotalAll += c.memberIncome || 0;
     if (p && p.status === 'submitted') pendingCount++;
     const dCash = p ? (Number(p.declaredCash) - c.expectedCash) : null;
     const dPix = p ? (Number(p.declaredPix) - c.pixIncome) : null;
@@ -5662,6 +5795,7 @@ function renderPrestacaoPanel() {
         <div>
           <div style="font-weight:700;">Setor ${String(sec.id).padStart(2, '0')} — ${sec.name}</div>
           <div style="font-size:12px; color:var(--text-muted);">Caixa esperado ${fmtMoney(c.expectedCash)} • PIX/POS esperado ${fmtMoney(c.pixIncome)}</div>
+          ${c.memberIncome ? `<div style="font-size:12px; color:var(--primary); margin-top:2px;">↳ Dízimos/ofertas de casa (membros): ${fmtMoney(c.memberIncome)} — Dízimo ${fmtMoney(c.memberDizimo)} • Oferta ${fmtMoney(c.memberOferta)}</div>` : ''}
         </div>
         <div style="text-align:right;">${p ? statusBadgePrestacao(p.status) : statusBadgePrestacao('open')}</div>
       </div>`;
@@ -5702,6 +5836,7 @@ function renderPrestacaoPanel() {
   panel.innerHTML = `
     <div style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">
       Conferência das prestações por setor (seg–dom). ${pendingCount ? `<strong>${pendingCount} prestação(ões) aguardando sua análise.</strong>` : 'Nenhuma prestação aguardando análise.'}
+      ${memberTotalAll ? `<div style="margin-top:6px; color:var(--primary);"><strong>Dízimos e ofertas de casa (membros) na semana: ${fmtMoney(memberTotalAll)}</strong> — já incluídos nas entradas PIX de cada setor.</div>` : ''}
     </div>
     <div style="border:1px solid #eee; border-radius:10px; padding:12px; background:#fafafa;">
       <table style="width:100%; border-collapse:collapse; font-size:12px;">
@@ -6082,25 +6217,70 @@ function renderEntriesScreen() {
     return;
   }
 
-  list.innerHTML = filtered.map(r => `
-    <div class="list-item" onclick="viewReceiptDetail('${r.id}')">
-      <div class="list-item-info">
-        <div class="list-item-title">${r.person.name}</div>
+  list.innerHTML = filtered.map(r => {
+    const pend = isPendingReceipt(r);
+    const canConfirm = pend && canConfirmReceipt(r);
+    const badge = pend
+      ? '<span class="list-item-badge" style="background:#FFF3CD; color:#8a6d00; border:1px solid #F0D48A;">Pendente</span>'
+      : '<span class="list-item-badge">' + fmtMoney(r.value) + '</span>';
+    return `<div class="list-item" style="display:flex; align-items:center; gap:8px;">
+      <div class="list-item-info" style="flex:1;" onclick="viewReceiptDetail('${r.id}')">
+        <div class="list-item-title">${r.person.name}${r.source === 'membro' ? ' <span style="font-size:10px; color:var(--primary);">(membro)</span>' : ''}</div>
         <div class="list-item-sub">${r.type} • ${fmtDate(new Date(r.date))} ${fmtTime(new Date(r.date))} • Recibo ${r.number}</div>
       </div>
-      <span class="list-item-badge">${fmtMoney(r.value)}</span>
-    </div>
-  `).join('');
+      <div style="display:flex; align-items:center; gap:6px;">
+        ${canConfirm ? `<button class="btn btn-primary" style="padding:6px 10px; font-size:12px;" onclick="confirmReceiptPix('${r.id}')">Confirmar PIX</button>` : ''}
+        ${badge}
+      </div>
+    </div>`;
+  }).join('');
 
-  // Resumo
-  const total = filtered.reduce((s,r) => s+r.value, 0);
-  const byType = filtered.reduce((acc,r) => { acc[r.type] = (acc[r.type]||0)+r.value; return acc; }, {});
+  // Resumo (pendentes não entram nos totais)
+  const confirmed = confirmedOnly(filtered);
+  const pending = filtered.filter(isPendingReceipt);
+  const total = confirmed.reduce((s,r) => s+r.value, 0);
+  const byType = confirmed.reduce((acc,r) => { acc[r.type] = (acc[r.type]||0)+r.value; return acc; }, {});
+  const pendTotal = pending.reduce((s,r) => s+r.value, 0);
   summaryGrid.innerHTML = `
     <div class="confirm-item"><div class="confirm-label">Total</div><div class="confirm-value amount">${fmtMoney(total)}</div></div>
-    <div class="confirm-item"><div class="confirm-label">Quantidade</div><div class="confirm-value">${filtered.length}</div></div>
+    <div class="confirm-item"><div class="confirm-label">Quantidade</div><div class="confirm-value">${confirmed.length}</div></div>
+    ${pending.length ? `<div class="confirm-item"><div class="confirm-label">Pendentes</div><div class="confirm-value" style="color:var(--warning);">${fmtMoney(pendTotal)} (${pending.length})</div></div>` : ''}
     ${Object.entries(byType).map(([type,val]) => `<div class="confirm-item"><div class="confirm-label">${type}</div><div class="confirm-value">${fmtMoney(val)}</div></div>`).join('')}
   `;
   summaryEl.style.display = 'block';
+}
+
+// Quem pode confirmar o recebimento de um PIX (dízimo/oferta de membro)
+function canConfirmReceipt(r) {
+  const u = currentUser;
+  if (!u) return false;
+  if (u.role === 'sede') return true;
+  if (u.role === 'tesoureiro_setor') return r.sectorId === u.sectorId;
+  if (u.role === 'tesoureiro_congregacao') return r.congregationId === u.congregationId;
+  return false;
+}
+
+async function confirmReceiptPix(id) {
+  const r = Storage.getReceipts().find(x => String(x.id) === String(id));
+  if (!r) return;
+  if (!isOnline() || !HAS_FETCH_MODE()) return showToast('Sem internet — confirme quando estiver online', 'warning');
+  try {
+    const out = await Api.put('/api/receipts/' + encodeURIComponent(id) + '/confirm', {});
+    const upd = mapReceipt(out.receipt);
+    Storage.saveReceipt(upd);
+    showToast('PIX confirmado! O valor entrou nos totais da congregação.', 'success');
+  } catch (e) {
+    return apiErrorToast(e);
+  }
+  renderEntriesScreen();
+  if (typeof renderDashboard === 'function' && $('screenDashboard')?.classList.contains('active')) renderDashboard();
+  if (typeof renderWeeklyClose === 'function' && $('screenWeeklyClose')?.classList.contains('active')) renderWeeklyClose();
+}
+
+async function confirmReceiptPixAndReload(id) {
+  await confirmReceiptPix(id);
+  const r = Storage.getReceipts().find(x => String(x.id) === String(id));
+  if (r) { renderReceipt(r); navigate('screenReceipt'); }
 }
 
 function filterEntries(type) {

@@ -58,8 +58,10 @@ Depois abra `http://localhost:8080/index.html` (o front detecta a API em `http:/
 - **Agradecimento por WhatsApp**: ao registrar um recibo, se o contribuinte for identificado por **código de membro ou CPF**, o botão **"Agradecer por WhatsApp"** abre o `wa.me` com uma mensagem de agradecimento personalizada (sem custo de API). O coletor também pode buscar o membro por nome, código ou CPF.
 - **Ditado de voz (coleta)**: o reconhecimento de fala usa **20 s de silêncio** antes de encerrar (configurável em `SpeechService.silenceMs`), com **limite de 3 min** por sessão e **religamento automático** quando o navegador (comum no Chrome do celular) encerra a escuta sozinho. Assim o coletor pode ditar os dados com calma, sem o ditado fechar no meio.
 - **Uso offline (PWA)**: o app é instalável (manifest + service worker) e abre sem internet. Sem conexão, **recibos e despesas** são gravados numa **fila de sincronização** local e enviados automaticamente quando a internet volta (ou manualmente, tocando no indicador no topo). O badge no topo mostra o estado: `🟢 Online`, `⏳ N pendentes` ou `📴 Offline (N)`.
-- **Dizimar/Ofertar de casa (portal do membro)**: o membro registra o próprio **dízimo** ou **oferta** pelo portal, direto de casa. O lançamento é **sempre PIX**, fica **vinculado ao código/CPF do membro** e **gera um recibo automaticamente** na congregação dele — portanto entra em todos os módulos (painel, fechamento semanal, prestação e limite de 40%). O portal exibe a **chave PIX da congregação** (com botão copiar) para o membro efetuar o pagamento.
+- **Dizimar/Ofertar de casa (portal do membro)**: o membro registra o próprio **dízimo** ou **oferta** pelo portal, direto de casa. O lançamento é **sempre PIX**, fica **vinculado ao código/CPF do membro** e **gera um recibo automaticamente** na congregação dele. O portal exibe a **chave PIX da congregação** e gera o **PIX copia-e-cola (BR Code) + QR Code** já com o valor digitado (ou sem valor, se não informado), para o membro pagar direto pelo app do banco.
+- **Confirmação do PIX (conciliação)**: o lançamento do membro nasce com situação **"Pendente"** e **não entra nos totais** (painel, fechamento semanal, prestação e limite de 40%). O **tesoureiro da congregação, tesoureiro de setor ou a sede** confirma o recebimento na tela **Lançamentos** (botão **"Confirmar PIX"**) ou no detalhe do recibo; a partir daí o valor passa a contar em todos os módulos. A confirmação grava **quem confirmou e quando** (auditoria).
 - **Chave PIX por congregação**: a sede e o tesoureiro de setor cadastram/editam a **chave PIX** (e o tipo) de cada congregação na tela **Cadastro de Congregações**. Sem chave, o portal do membro avisa que ela ainda não foi cadastrada (mas o lançamento já pode ser feito).
+- **Destaque do dízimo/oferta de casa**: a prestação de contas e os relatórios (Excel/impressão) mostram, separadamente, o total de **"Dízimos e ofertas de casa (membros)"** da semana (com a divisão entre dízimos e ofertas), além da marcação de origem **Membro (casa)** / Coleta em cada lançamento.
 
 
 ### 4.1 Matriz de permissões por perfil
@@ -113,7 +115,7 @@ Com o backend no ar, rode o teste de integração:
 
 ```powershell
 $env:Path = "C:\Program Files\nodejs;" + $env:Path
-node "$env:TEMP\opencode\apitest.mjs" "index.html"   # 126/126
+node "$env:TEMP\opencode\apitest.mjs" "index.html"   # 133/133
 ```
 
 Testes do modo offline/PWA (não precisam da API para o `offlinetest`):
@@ -121,7 +123,7 @@ Testes do modo offline/PWA (não precisam da API para o `offlinetest`):
 ```powershell
 node "$env:TEMP\offlinetest.mjs" "index.html"        # 10/10  (fila offline: add/remove/badge/id local)
 node "$env:TEMP\draintest.mjs"  "index.html"         # 7/7    (drena a fila para o servidor e troca o id)
-node "$env:TEMP\givetest.mjs"   "index.html"         # 9/9    (dizimar/ofertar do membro: PIX, vínculo, offline)
+node "$env:TEMP\givetest.mjs"   "index.html"         # 21/21  (dizimar/ofertar: PIX, BR Code, pendente/confirmado, offline)
 ```
 
 O teste reproduz o cookie http-only num jar próprio, então cobre o fluxo real de sessão. A suíte

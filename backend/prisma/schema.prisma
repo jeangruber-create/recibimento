@@ -107,6 +107,9 @@ model Receipt {
   value            Decimal  @db.Decimal(12, 2)
   payment          Payment  @default(dinheiro)
   status           String   @default("confirmado")
+  source           String?
+  confirmedAt      DateTime?
+  confirmedByEmail String?
   date             DateTime @default(now())
   sectorId         Int
   congregationId   Int

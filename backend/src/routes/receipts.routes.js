@@ -92,6 +92,8 @@ router.post('/', async (req, res, next) => {
     let personName = data.person.name;
     let personMemberCode = data.person.memberCode ?? null;
     let payment = data.payment || 'dinheiro';
+    let status = data.status || 'confirmado';
+    let source = null;
     let createdById = req.user.sub;
     if (req.user.role === 'membro') {
       if (!req.user.memberCode) throw httpError(400, 'Membro sem código de identificação');
@@ -99,6 +101,9 @@ router.post('/', async (req, res, next) => {
       personName = self.person.name;
       personMemberCode = self.person.memberCode;
       payment = self.payment;
+      // Dízimo/oferta de casa entra como pendente até a tesouraria confirmar o PIX.
+      status = 'pendente';
+      source = 'membro';
     }
 
     const receipt = await prisma.$transaction(async (tx) => {
@@ -110,7 +115,8 @@ router.post('/', async (req, res, next) => {
           type: data.type,
           value: data.value,
           payment,
-          status: data.status || 'confirmado',
+          status,
+          source,
           date: data.date ? new Date(data.date) : new Date(),
           sectorId: scope.sectorId,
           congregationId: scope.congregationId,
@@ -125,11 +131,43 @@ router.post('/', async (req, res, next) => {
         sectorId: created.sectorId,
         congregationId: created.congregationId,
         summary: `${created.type}: ${created.personName}`,
-        after: { number: created.number, personName: created.personName, type: created.type, value: Number(created.value), payment: created.payment },
+        after: { number: created.number, personName: created.personName, type: created.type, value: Number(created.value), payment: created.payment, status: created.status },
       });
       return created;
     });
     res.status(201).json({ receipt: serializeReceipt(receipt) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Confirma o recebimento do PIX (dízimo/oferta declarado pelo membro).
+router.put('/:id/confirm', async (req, res, next) => {
+  try {
+    const existing = await prisma.receipt.findUnique({ where: { id: req.params.id } });
+    if (!existing) throw httpError(404, 'Recebimento não encontrado');
+    if (!canWriteReceipt(req.user, existing)) throw httpError(403, 'Sem permissão para confirmar este recebimento');
+    if (existing.status === 'confirmado') return res.json({ receipt: serializeReceipt(existing) });
+
+    const receipt = await prisma.$transaction(async (tx) => {
+      const updated = await tx.receipt.update({
+        where: { id: existing.id },
+        data: { status: 'confirmado', confirmedAt: new Date(), confirmedByEmail: req.user.email || null },
+      });
+      await logAudit(tx, {
+        user: req.user,
+        action: 'receipt.confirm',
+        entity: 'Receipt',
+        entityId: existing.id,
+        sectorId: existing.sectorId,
+        congregationId: existing.congregationId,
+        summary: `Confirmação de PIX: ${existing.type} de ${existing.personName}`,
+        before: { status: existing.status },
+        after: { status: updated.status, confirmedByEmail: updated.confirmedByEmail },
+      });
+      return updated;
+    });
+    res.json({ receipt: serializeReceipt(receipt) });
   } catch (e) {
     next(e);
   }
