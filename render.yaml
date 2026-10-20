@@ -1,10 +1,6 @@
-# Blueprint do Render: servidor único (API Node + Prisma + PostgreSQL, servindo também o front).
+# Blueprint do Render: servidor único (web service Node + Prisma) servindo também o front.
+# O banco fica no Neon (grátis, sem cartão, não expira) — passo a passo no README §6.
 # Se renomear o serviço, ajuste CORS_ORIGIN para https://<nome>.onrender.com.
-databases:
-  - name: adm-recebimentos-db
-    databaseName: adm_recebimentos
-    user: adm
-
 services:
   - type: web
     name: adm-recebimentos-api
@@ -18,14 +14,11 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      - key: DATABASE_URL
-        fromDatabase:
-          name: adm-recebimentos-db
-          property: connectionString
+      # DATABASE_URL não está aqui de propósito: cole no painel (Environment) a string
+      # de conexão do Neon (Direct). O Blueprint não mexe nela depois.
       - key: JWT_SECRET
         generateValue: true
-      # Servidor único: a API entrega o index.html em "/", então origem é a mesma.
-      # Ajuste se você renomear o serviço (URL = https://<nome>.onrender.com)
+      # Servidor único: a API entrega o index.html em "/" — mesma origem.
       - key: CORS_ORIGIN
         value: https://adm-recebimentos-api.onrender.com
       - key: TRUST_PROXY

@@ -133,41 +133,70 @@ Importante: para rodar os testes sem estourar o limite de login (20/15min), suba
 $env:NODE_ENV="test"; npm start
 ```
 
-## 6. Publicar na web (Render — servidor único)
+## 6. Publicar na web (Render + Neon, grátis e sem cartão)
 
 A API entrega o `index.html` em `/` (seção 5), então **um único serviço publica o sistema inteiro**:
 mesma origem, cookie `SameSite=Strict`, sem CORS entre domínios e **sem nenhum ajuste no HTML**.
 
-### 6.1 Subir no Render (Blueprint)
+| Onde | O quê | Preço |
+|---|---|---|
+| GitHub | código-fonte (já feito) | grátis |
+| **Render** | web service Node servindo API + front | Free (sem cartão; dorme após 15 min) |
+| **Neon** | PostgreSQL do sistema | Free (sem cartão; **não expira**) |
 
-1. Crie um repositório no GitHub com este projeto e envie (`git push`).
-2. Em [render.new](https://render.new) → **New +** → **Blueprint** → aponte para o repositório.
-   O `render.yaml` da raiz cria:
-   - banco PostgreSQL `adm-recebimentos-db`;
-   - serviço `adm-recebimentos-api` (Node), com build
-     `npm install && npx prisma generate && npx prisma migrate deploy` e start `npm start`.
-3. Se renomear o serviço, ajuste `CORS_ORIGIN` no `render.yaml` para a nova URL
-   (`https://<nome-do-servico>.onrender.com`).
-4. Depois do primeiro deploy, abra **Shell** no painel do serviço e rode `npm run seed`
-   (cria setores, congregações e usuários de teste — senha `123456`).
-5. Confira `https://adm-recebimentos-api.onrender.com/health` → `{"ok":true}`; depois abra a raiz
-   `https://adm-recebimentos-api.onrender.com/` → tela de login.
+> Por que **não** usar o Postgres do Render: o banco grátis dele **expira em 30 dias** (mais 14 de
+> carência) e **apaga todos os dados**. O do Neon é permanente.
 
-Variáveis do blueprint: `NODE_ENV`, `DATABASE_URL` (do banco criado), `JWT_SECRET` (gerado),
-`CORS_ORIGIN` e `TRUST_PROXY=1`.
+### 6.1 Banco no Neon (1 minuto, sem cartão)
 
-### 6.2 Depois de publicar
+1. [neon.com](https://neon.com) → **Sign up** (dá para entrar com a conta GitHub) — **não pede cartão**.
+2. Crie um projeto (padrão) e em **Connection Details** escolha **Direct** (não o *Pooled*):
+   o build roda `prisma migrate deploy` e as migrações precisam de conexão direta.
+3. Copie a string `postgresql://...` (já vem com `sslmode=require`).
+
+### 6.2 Serviço no Render (Blueprint)
+
+1. [render.new](https://render.new) → **Sign in with GitHub** → **New +** → **Blueprint** →
+   conecte o repositório `jeangruber-create/adm-recebimentos` → **Apply**.
+   O `render.yaml` cria só o serviço `adm-recebimentos-api` no plano **Free** (se pedir plano,
+   escolha **Free** — o cartão não é necessário).
+2. Na revisão do Blueprint, se ele pedir o valor de `DATABASE_URL`, cole a string do Neon ali mesmo.
+   Se não pedir: entre no serviço → **Environment** → **Add Environment Variable** →
+   `DATABASE_URL` = string do Neon → **Save** → **Manual Deploy → Clear build cache & deploy**
+   (o primeiro build sem essa variável falha — é esperado).
+3. Build: `npm install && npx prisma generate && npx prisma migrate deploy` (cria as tabelas no Neon).
+4. Confira `https://adm-recebimentos-api.onrender.com/health` → `{"ok":true}` e abra a raiz
+   (`https://adm-recebimentos-api.onrender.com/`) → tela de login.
+
+Outras variáveis do blueprint: `NODE_ENV`, `JWT_SECRET` (gerado), `CORS_ORIGIN` e `TRUST_PROXY=1`.
+
+### 6.3 Seed dos usuários (na sua máquina)
+
+O plano **Free do Render não tem Shell**, então o seed roda **localmente**, apontando para o Neon:
+
+```powershell
+cd "C:\Users\Jean Gruber\Documents\New OpenCode Project\backend"
+npm install                      # só na primeira vez
+npm run prisma:generate
+$env:DATABASE_URL = "<string do Neon>"
+npm run seed                     # cria setores, congregações e usuários de teste
+```
+
+Login: `admin@adm.org.br` / `123456`.
+
+### 6.4 Depois de publicar
 
 - Troque as senhas dos usuários demo e cadastre os reais pelo painel da sede.
-- Free tier do Render: o serviço dorme após ~15 min sem tráfego — o primeiro acesso seguinte
-  leva ~30 s.
-- A CSP do `helmet` já libera os 3 CDN que o front usa (SheetJS, qrcodejs, html5-qrcode), então
-  servir o `index.html` pela própria API não quebra nada.
+- **Render**: dorme após ~15 min sem tráfego (o primeiro acesso seguinte leva ~30 s);
+  750 horas grátis por mês e 5 GB de banda. **Neon**: o compute dorme após 5 min ocioso e acorda
+  sozinho na primeira conexão — os dados ficam guardados.
+- `autoDeploy: true`: cada `git push` no GitHub já recompila e redesenha o serviço.
+- A CSP do `helmet` libera os 3 CDN que o front usa (SheetJS, qrcodejs, html5-qrcode).
 
-### 6.3 (Opcional) Front em hospedagem separada
+### 6.5 (Opcional) Front em hospedagem separada
 
-Se um dia quiser um endereço próprio que não durma (GitHub Pages, Cloudflare Pages, Netlify,
-ProFreeHost...), o suporte já está no código:
+Se um dia quiser um endereço próprio que não durma (GitHub Pages, Cloudflare Pages, Netlify...),
+o suporte já está no código:
 
 1. No topo do `<head>` do `index.html`:
    ```html
@@ -176,13 +205,14 @@ ProFreeHost...), o suporte já está no código:
    O `??` preserva `""`, que o backend injeta quando ele também serve o front.
 2. Na API: `CROSS_SITE=1` (o cookie passa a sair como `SameSite=None; Secure`) e `CORS_ORIGIN`
    com a origem exata do front (protocolo + domínio, sem `/` no final).
-3. Suba só o `index.html` (257 KB; no ProFreeHost o limite é 10 MB por arquivo) e ative o SSL.
 
-### 6.4 Se algo falhar
+### 6.6 Se algo falhar
 
 | Sintoma | Causa provável |
 |---|---|
-| `Failed to fetch` ao logar | deploy da API ainda subindo, ou serviço parado no Render |
+| Build falha em `prisma migrate deploy` | `DATABASE_URL` ausente ou errada (use a string **Direct** do Neon) |
+| Erro `P1001`/timeout no log | string errada, ou compute do Neon dormindo (normal: reabra a página) |
+| `Failed to fetch` ao logar | deploy ainda subindo, ou serviço parado no Render |
 | Sai logado ao recarregar | `JWT_SECRET` foi regerado/removido nas env vars do Render |
 | `429` no login | limite de tentativas (20/15 min por IP); reinicie o serviço no Render |
-| Página sem dados | `npm run seed` não rodou, ou `DATABASE_URL` apontando para outro banco |
+| Página sem dados | `npm run seed` não rodou (§6.3) |
