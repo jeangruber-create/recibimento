@@ -147,12 +147,26 @@ mesma origem, cookie `SameSite=Strict`, sem CORS entre domínios e **sem nenhum 
 > Por que **não** usar o Postgres do Render: o banco grátis dele **expira em 30 dias** (mais 14 de
 > carência) e **apaga todos os dados**. O do Neon é permanente.
 
-### 6.1 Banco no Neon (1 minuto, sem cartão)
+### 6.1 Banco no Neon (grátis, sem cartão)
 
-1. [neon.com](https://neon.com) → **Sign up** (dá para entrar com a conta GitHub) — **não pede cartão**.
-2. Crie um projeto (padrão) e em **Connection Details** escolha **Direct** (não o *Pooled*):
-   o build roda `prisma migrate deploy` e as migrações precisam de conexão direta.
-3. Copie a string `postgresql://...` (já vem com `sslmode=require`).
+Provisionado com a CLI do Neon (feito nesta máquina; `neon` fica em `%APPDATA%\npm\neon.cmd` —
+o PowerShell bloqueia o `.ps1` por política de execução):
+
+```powershell
+npm i -g neon@latest
+neon login                       # abre o navegador (60 s para autorizar)
+neon init -y --org-id org-billowing-mouse-49680305 --project-id noisy-block-71166023 `
+           --branch production --services postgres
+neon deploy                      # aplica a política e grava .env.local na raiz
+```
+
+- Projeto `noisy-block-71166023` ("recebimento", branch `production`); vínculo em `.neon`,
+  política em `neon.ts`, skill do agente em `.agents/skills/neon`.
+- `.env.local` (**não vai para o Git**) traz `DATABASE_URL` (pooler), `DATABASE_URL_UNPOOLED`
+  (direta) e `NEON_BRANCH`.
+- `backend/.env` recebe as duas: `DATABASE_URL` = pooler (tráfego da aplicação, conforme a
+  skill do Neon) e `DIRECT_URL` = direta — o `schema.prisma` declara `directUrl = env("DIRECT_URL")`,
+  então `prisma migrate deploy` usa a conexão direta (necessário: migrações não passam por pgbouncer).
 
 ### 6.2 Serviço no Render (Blueprint)
 
@@ -160,10 +174,11 @@ mesma origem, cookie `SameSite=Strict`, sem CORS entre domínios e **sem nenhum 
    conecte o repositório `jeangruber-create/adm-recebimentos` → **Apply**.
    O `render.yaml` cria só o serviço `adm-recebimentos-api` no plano **Free** (se pedir plano,
    escolha **Free** — o cartão não é necessário).
-2. Na revisão do Blueprint, se ele pedir o valor de `DATABASE_URL`, cole a string do Neon ali mesmo.
-   Se não pedir: entre no serviço → **Environment** → **Add Environment Variable** →
-   `DATABASE_URL` = string do Neon → **Save** → **Manual Deploy → Clear build cache & deploy**
-   (o primeiro build sem essa variável falha — é esperado).
+2. Na revisão do Blueprint, se ele pedir as variáveis, cole ali mesmo (veja o `.env.local`).
+   Se não pedir: entre no serviço → **Environment** → **Add Environment Variable** e crie as duas:
+   `DATABASE_URL` (pooler) e `DIRECT_URL` (direta) → **Save** →
+   **Manual Deploy → Clear build cache & deploy**
+   (o primeiro build sem elas falha — é esperado).
 3. Build: `npm install && npx prisma generate && npx prisma migrate deploy` (cria as tabelas no Neon).
 4. Confira `https://adm-recebimentos-api.onrender.com/health` → `{"ok":true}` e abra a raiz
    (`https://adm-recebimentos-api.onrender.com/`) → tela de login.
@@ -172,14 +187,13 @@ Outras variáveis do blueprint: `NODE_ENV`, `JWT_SECRET` (gerado), `CORS_ORIGIN`
 
 ### 6.3 Seed dos usuários (na sua máquina)
 
-O plano **Free do Render não tem Shell**, então o seed roda **localmente**, apontando para o Neon:
+O plano **Free do Render não tem Shell**, então o seed roda **localmente** (usa o `backend/.env`
+gravado no passo 6.1):
 
 ```powershell
-cd "C:\Users\Jean Gruber\Documents\New OpenCode Project\backend"
-npm install                      # só na primeira vez
-npm run prisma:generate
-$env:DATABASE_URL = "<string do Neon>"
-npm run seed                     # cria setores, congregações e usuários de teste
+npm run build             # prisma generate (raiz -> backend)
+npm run migrate:deploy    # aplica as 3 migrações no Neon
+npm run seed              # cria 20 setores, 120 congregações e 6 usuários
 ```
 
 Login: `admin@adm.org.br` / `123456`.
@@ -210,7 +224,7 @@ o suporte já está no código:
 
 | Sintoma | Causa provável |
 |---|---|
-| Build falha em `prisma migrate deploy` | `DATABASE_URL` ausente ou errada (use a string **Direct** do Neon) |
+| Build falha em `prisma migrate deploy` | `DIRECT_URL`/`DATABASE_URL` ausentes ou erradas (veja `.env.local`) |
 | Erro `P1001`/timeout no log | string errada, ou compute do Neon dormindo (normal: reabra a página) |
 | `Failed to fetch` ao logar | deploy ainda subindo, ou serviço parado no Render |
 | Sai logado ao recarregar | `JWT_SECRET` foi regerado/removido nas env vars do Render |

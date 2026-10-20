@@ -4,3 +4,9 @@
 !/README.md
 !/render.yaml
 !/backend/
+!/neon.ts
+!/.neon
+!/package.json
+!/package-lock.json
+!/skills-lock.json
+!/.agents/

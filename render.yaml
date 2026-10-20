@@ -14,8 +14,9 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      # DATABASE_URL não está aqui de propósito: cole no painel (Environment) a string
-      # de conexão do Neon (Direct). O Blueprint não mexe nela depois.
+      # DATABASE_URL (pooler) e DIRECT_URL (conexao direta, usada pelo prisma migrate)
+      # não estão aqui de propósito: cole no painel (Environment) as strings do Neon
+      # (`.env.local` gerado por `neon deploy`). O Blueprint não mexe nelas depois.
       - key: JWT_SECRET
         generateValue: true
       # Servidor único: a API entrega o index.html em "/" — mesma origem.
