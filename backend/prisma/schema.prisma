@@ -63,7 +63,8 @@ model User {
 
   sector       Sector?       @relation(fields: [sectorId], references: [id])
   congregation Congregation? @relation(fields: [congregationId], references: [id])
-  receipts     Receipt[]
+  receipts     Receipt[]     @relation("ReceiptCreatedBy")
+  personReceipts Receipt[]   @relation("ReceiptPerson")
   expenses     Expense[]
 
   @@index([sectorId])
@@ -114,14 +115,17 @@ model Receipt {
   sectorId         Int
   congregationId   Int
   createdById      Int?
+  personUserId     Int?
   createdAt        DateTime @default(now())
 
   sector       Sector       @relation(fields: [sectorId], references: [id])
   congregation Congregation @relation(fields: [congregationId], references: [id])
-  createdBy    User?        @relation(fields: [createdById], references: [id])
+  createdBy    User?        @relation("ReceiptCreatedBy", fields: [createdById], references: [id])
+  personUser   User?        @relation("ReceiptPerson", fields: [personUserId], references: [id])
 
   @@index([sectorId, congregationId, date])
   @@index([personMemberCode])
+  @@index([personUserId])
   @@index([date])
 }
 

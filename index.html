@@ -693,6 +693,47 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
     </div>
   </section>
 
+  <!-- SCREEN: MEMBROS / CONTATOS (base consolidada, interações e histórico) -->
+  <section class="screen screen--board" id="screenMembers" data-title="Membros">
+    <div class="card">
+      <div class="card-title-row">
+        <h3 class="card-title" style="margin:0;">Membros & Contatos</h3>
+        <button class="btn btn-ghost" style="padding:8px 12px;" onclick="exportMembersExcel()">Excel</button>
+      </div>
+      <div class="form-group" style="margin-bottom:10px;">
+        <input type="text" class="form-input" id="membersSearch" placeholder="Buscar por nome, código, CPF ou celular" oninput="renderMembersScreen()">
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <select class="form-select" id="membersFilterSector" style="flex:1; min-width:130px;" onchange="onMembersFilterChange()"></select>
+        <select class="form-select" id="membersFilterCong" style="flex:1; min-width:130px;" onchange="renderMembersScreen()"></select>
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+        <select class="form-select" id="membersFilterStatus" style="flex:1; min-width:130px;" onchange="renderMembersScreen()">
+          <option value="">Todos os cadastros</option>
+          <option value="complete">Cadastro completo</option>
+          <option value="incomplete">Cadastro incompleto</option>
+        </select>
+        <select class="form-select" id="membersSort" style="flex:1; min-width:130px;" onchange="renderMembersScreen()">
+          <option value="name">Ordenar por nome</option>
+          <option value="total">Maiores contribuintes</option>
+          <option value="recent">Cadastros recentes</option>
+        </select>
+      </div>
+      <div id="membersSummary" style="margin-top:12px;"></div>
+    </div>
+    <div class="card card--wide">
+      <div id="membersList"><div style="color:var(--text-muted); font-size:14px; text-align:center; padding:16px;">Carregando…</div></div>
+    </div>
+    <button class="btn btn-ghost" style="width:100%;" onclick="navigate('screenAdmin')">Voltar</button>
+  </section>
+
+  <!-- SCREEN: DETALHE DO MEMBRO (histórico e interações) -->
+  <section class="screen" id="screenMemberDetail" data-title="Membro">
+    <div id="memberDetailBody"></div>
+    <button class="btn btn-ghost" style="width:100%; margin-top:8px;" onclick="navigate('screenMembers')">Voltar aos Membros</button>
+  </section>
+
+
   <!-- SCREEN: CADASTRO DE SETORES -->
   <section class="screen" id="screenSectorRegister" data-title="Cadastro Setor">
     <div class="card">
@@ -1267,12 +1308,16 @@ function generateMemberCode() {
   return code;
 }
 
-// Todas as pessoas (mock + membros cadastrados como usuário)
+// Pessoas recém-cadastradas no balcão (banco) — mantidas em cache para busca
+// imediata antes do próximo refresh da lista de membros.
+let membersExtra = [];
+
+// Todas as pessoas (mock + membros cadastrados como usuário + balcão no banco)
 function getAllPeople() {
   const members = USERS.filter(u => u.role === 'membro').map(u => {
     const prof = Storage.getMemberProfile(u.memberCode ? String(u.memberCode) : ('email:' + u.email));
     return {
-      id: u.memberCode || ('M' + u.email),
+      id: u.id != null ? u.id : (u.memberCode || ('M' + u.email)),
       name: (prof && prof.name) || u.name,
       congregationId: u.congregationId,
       phone: (prof && prof.phone) || u.phone || '',
@@ -1284,10 +1329,11 @@ function getAllPeople() {
       memberCode: u.memberCode
     };
   });
-  const memberCodes = new Set(members.map(m => m.memberCode));
+  const memberCodes = new Set(members.map(m => m.memberCode).filter(Boolean));
+  const extras = membersExtra.filter(p => p.memberCode && !memberCodes.has(p.memberCode));
   const mocks = MOCK_PEOPLE.filter(p => !memberCodes.has(p.memberCode));
   const locals = Storage.getLocalPeople().filter(p => !memberCodes.has(p.memberCode));
-  return [...mocks, ...locals, ...members];
+  return [...extras, ...mocks, ...locals, ...members];
 }
 
 let currentUser = null;
@@ -2685,8 +2731,52 @@ function createNewPerson() {
   Storage.saveLocalPeople(Storage.getLocalPeople().concat(newPerson));
   currentReceipt.person = newPerson;
   selectPerson(newPerson.id);
-  registerPendingRegistrationAlert(newPerson);
+  try { registerPendingRegistrationAlert(newPerson); } catch (e) { /* ignore */ }
   showToast('Cadastro criado com dados parciais', 'success');
+
+  // Sincroniza com o servidor em background (fica visível na tela Membros & Contatos).
+  if (HAS_FETCH_MODE() && isOnline()) {
+    (async () => {
+      try {
+        const out = await Api.post('/api/members', { name, congregationId, sectorId });
+        const m = out.member;
+        const person = {
+          id: m.id,
+          serverId: m.id,
+          name: m.name,
+          sectorId: m.sectorId,
+          congregationId: m.congregationId,
+          phone: m.phone || '',
+          cpf: m.cpf || null,
+          cep: m.cep || null,
+          addressNumber: m.addressNumber || '',
+          type: 'Membro',
+          memberCode: m.memberCode,
+          profileComplete: false,
+          pendingRegistration: true,
+          createdAt: m.createdAt,
+        };
+        membersExtra = membersExtra.filter(p => p.memberCode !== person.memberCode);
+        membersExtra.push(person);
+        // Substitui o cadastro local pelo servidor (mesmo código)
+        try {
+          const locals = Storage.getLocalPeople().filter(p => p.memberCode !== person.memberCode);
+          Storage.saveLocalPeople(locals.concat({ ...person, pendingRegistration: true }));
+        } catch (e) { /* ignore */ }
+        if (currentReceipt && currentReceipt.person && currentReceipt.person.memberCode === person.memberCode) {
+          currentReceipt.person = person;
+        }
+        if (canManage(currentUser)) refreshMembersInBackground();
+      } catch (e) {
+        // offline/erro: mantém o cadastro local
+      }
+    })();
+  }
+}
+
+// Recarrega silenciosamente a lista de membros se a tela estiver aberta.
+function refreshMembersInBackground() {
+  if ($('membersList')) renderMembersScreen();
 }
 
 // ============ QR CODE (coletor) ============
@@ -2941,6 +3031,8 @@ function navigate(screenId) {
   if (screenId === 'screenDashboard') renderDashboard();
   if (screenId === 'screenWeeklyClose') renderWeeklyClose();
   if (screenId === 'screenMember') renderMemberPortal();
+  if (screenId === 'screenMembers') renderMembersScreen();
+  if (screenId === 'screenMemberDetail') renderMemberDetailScreen();
 }
 
 $('btnHome').onclick = goHome;
@@ -3186,6 +3278,12 @@ function renderAdminScreen() {
     </button>`;
   }
 
+  // Base consolidada de membros/contatos (lista, interações, histórico e Excel)
+  html += `<button class="btn btn-secondary" onclick="navigate('screenMembers')" style="text-align:left; justify-content:flex-start;">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+    Membros & Contatos
+  </button>`;
+
   menu.innerHTML = html;
 
   // Estatísticas (escopo do perfil)
@@ -3342,8 +3440,317 @@ function renderUsersList() {
         <span class="list-item-badge" style="background:${badgeColor}; color:${u.role === 'tesoureiro_setor' ? 'var(--primary)' : 'white'};">${ROLE_LABELS[u.role]}</span>
         ${u.email !== currentUser.email && canManageUser(u) ? `<button class="btn btn-ghost" title="Redefinir senha" style="padding:8px;" onclick="resetUserPassword(${idx})">🔑</button>` : ''}
         ${canDelete ? `<button class="btn btn-ghost" style="padding:8px; color:var(--error);" onclick="deleteUser(${idx})">✕</button>` : ''}
-      </div>`;
+      </div>    `;
   }).join('') || '<div style="color:var(--text-muted); font-size:14px; text-align:center; padding:16px;">Nenhum usuário no seu escopo</div>';
+}
+
+// ============ MEMBROS & CONTATOS (base consolidada) ============
+let membersData = [];
+let membersDetail = null;
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function membersQuery() {
+  const params = new URLSearchParams();
+  const q = ($('membersSearch')?.value || '').trim();
+  if (q) params.set('search', q);
+  const sec = $('membersFilterSector')?.value;
+  const cong = $('membersFilterCong')?.value;
+  const status = $('membersFilterStatus')?.value;
+  const sort = $('membersSort')?.value;
+  if (sec) params.set('sectorId', sec);
+  if (cong) params.set('congregationId', cong);
+  if (status) params.set('status', status);
+  if (sort) params.set('sort', sort);
+  const s = params.toString();
+  return s ? '?' + s : '';
+}
+
+// Monta os selects de filtro (setor/congregação) respeitando o escopo do perfil.
+function fillMembersFilters() {
+  const secSel = $('membersFilterSector');
+  const congSel = $('membersFilterCong');
+  if (!secSel || !congSel) return;
+  const sects = getManageableSectors(currentUser);
+  const isSede = currentUser?.role === 'sede';
+
+  if (isSede) {
+    const cur = secSel.value;
+    secSel.innerHTML = '<option value="">Todos os setores</option>' +
+      sects.map(s => `<option value="${s.id}">${String(s.id).padStart(2, '0')} — ${esc(s.name)}</option>`).join('');
+    secSel.value = cur;
+  } else {
+    secSel.innerHTML = '';
+    secSel.style.display = 'none';
+  }
+
+  const congs = getManageableCongregations(currentUser).filter(c => !secSel.value || String(c.sectorId) === String(secSel.value));
+  const curCong = congSel.value;
+  const showCong = isSede || currentUser?.role === 'tesoureiro_setor';
+  if (showCong) {
+    congSel.style.display = '';
+    congSel.innerHTML = '<option value="">Todas as congregações</option>' +
+      congs.map(c => `<option value="${c.id}">${esc(c.code)} — ${esc(c.name)}</option>`).join('');
+    congSel.value = curCong;
+  } else {
+    congSel.innerHTML = '';
+    congSel.style.display = 'none';
+  }
+}
+
+function onMembersFilterChange() {
+  $('membersFilterCong').value = '';
+  fillMembersFilters();
+  renderMembersScreen();
+}
+
+async function renderMembersScreen() {
+  if (!canManage(currentUser)) { showToast('Acesso restrito', 'error'); return navigate('screenAdmin'); }
+  fillMembersFilters();
+  const listEl = $('membersList');
+  const sumEl = $('membersSummary');
+  if (!HAS_FETCH_MODE()) {
+    listEl.innerHTML = '<div style="color:var(--text-muted); font-size:14px; text-align:center; padding:16px;">Disponível apenas conectado ao servidor.</div>';
+    if (sumEl) sumEl.innerHTML = '';
+    return;
+  }
+  listEl.innerHTML = '<div style="color:var(--text-muted); font-size:14px; text-align:center; padding:16px;">Carregando…</div>';
+  try {
+    const out = await Api.get('/api/members' + membersQuery());
+    membersData = out.members || [];
+    const s = out.summary || {};
+    if (sumEl) {
+      sumEl.innerHTML = `
+        <div class="confirm-grid">
+          <div class="confirm-item"><div class="confirm-label">Cadastrados</div><div class="confirm-value">${s.count || 0}</div></div>
+          <div class="confirm-item"><div class="confirm-label">Incompletos</div><div class="confirm-value" style="color:var(--warning);">${s.incomplete || 0}</div></div>
+          <div class="confirm-item"><div class="confirm-label">Contribuíram</div><div class="confirm-value" style="color:var(--success);">${s.contributors || 0}</div></div>
+          <div class="confirm-item"><div class="confirm-label">Total confirmado</div><div class="confirm-value">${fmtMoney(s.total || 0)}</div></div>
+        </div>`;
+    }
+    renderMembersList();
+  } catch (e) {
+    listEl.innerHTML = `<div style="color:var(--error); font-size:14px; text-align:center; padding:16px;">${esc(e.message || 'Falha ao carregar')}</div>`;
+  }
+}
+
+function memberLocLabel(m) {
+  const parts = [];
+  if (m.sectorName || m.sectorId) parts.push('Setor ' + (m.sectorName ? esc(m.sectorName) : String(m.sectorId).padStart(2, '0')));
+  if (m.congregationName || m.congregationCode) parts.push('Cong ' + esc(m.congregationCode || m.congregationName));
+  return parts.join(' • ');
+}
+
+function renderMembersList() {
+  const listEl = $('membersList');
+  if (!membersData.length) {
+    listEl.innerHTML = '<div style="color:var(--text-muted); font-size:14px; text-align:center; padding:16px;">Nenhum membro encontrado com os filtros atuais.</div>';
+    return;
+  }
+  listEl.innerHTML = membersData.map(m => {
+    const badge = m.profileComplete
+      ? '<span class="list-item-badge" style="background:var(--success); color:white;">Completo</span>'
+      : '<span class="list-item-badge" style="background:var(--warning); color:white;">Incompleto</span>';
+    const total = m.totals && m.totals.total > 0
+      ? `<span style="color:var(--success); font-weight:600;">${fmtMoney(m.totals.total)}</span>`
+      : '<span style="color:var(--text-muted);">sem contribuição</span>';
+    return `
+      <div class="list-item">
+        <div class="list-item-info" style="cursor:pointer;" onclick="openMemberDetail(${m.id})">
+          <div class="list-item-title">${esc(m.name)} ${m.memberCode ? `<span style="font-family:monospace; font-size:12px; color:var(--primary);">${esc(m.memberCode)}</span>` : ''}</div>
+          <div class="list-item-sub">${memberLocLabel(m) || 'Sem congregação'} • ${m.phone ? esc(m.phone) : 'sem telefone'} • ${total}</div>
+        </div>
+        <div style="display:flex; gap:4px; align-items:center;">
+          ${badge}
+          ${m.phone ? `<button class="btn btn-ghost" title="Agradecer por WhatsApp" style="padding:8px;" onclick="memberWhatsApp(${m.id}, 'agradecimento')">🙏</button>` : ''}
+          <button class="btn btn-ghost" title="Abrir ficha" style="padding:8px;" onclick="openMemberDetail(${m.id})">›</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function memberById(id) {
+  return membersData.find(m => String(m.id) === String(id));
+}
+
+async function openMemberDetail(id) {
+  if (!HAS_FETCH_MODE()) return showToast('Disponível apenas conectado ao servidor', 'warning');
+  const listEl = $('memberDetailBody');
+  navigate('screenMemberDetail');
+  listEl.innerHTML = '<div class="card"><div style="color:var(--text-muted); text-align:center;">Carregando…</div></div>';
+  try {
+    membersDetail = await Api.get('/api/members/' + encodeURIComponent(id));
+    renderMemberDetailScreen();
+  } catch (e) {
+    listEl.innerHTML = `<div class="card"><div style="color:var(--error); text-align:center;">${esc(e.message || 'Falha ao carregar')}</div></div>`;
+  }
+}
+
+function renderMemberDetailScreen() {
+  const el = $('memberDetailBody');
+  if (!el) return;
+  const d = membersDetail;
+  if (!d || !d.member) {
+    el.innerHTML = '<div class="card"><div style="color:var(--text-muted); text-align:center;">Selecione um membro na lista.</div></div>';
+    return;
+  }
+  const m = d.member;
+  const t = m.totals || {};
+  const receipts = d.receipts || [];
+  const badge = m.profileComplete
+    ? '<span class="list-item-badge" style="background:var(--success); color:white;">Completo</span>'
+    : '<span class="list-item-badge" style="background:var(--warning); color:white;">Incompleto</span>';
+  const rows = receipts.length ? receipts.map(r => `
+      <div class="list-item">
+        <div class="list-item-info">
+          <div class="list-item-title">${esc(r.type)} — ${fmtMoney(r.value)}</div>
+          <div class="list-item-sub">${fmtDate(new Date(r.date))} • ${metaLabel(r.payment)}${r.source === 'membro' ? ' • casa' : ''}</div>
+        </div>
+        <button class="btn btn-ghost" style="padding:8px;" title="Ver recibo" onclick="viewMemberReceipt('${r.id}')">🧾</button>
+      </div>`).join('')
+    : '<div style="color:var(--text-muted); font-size:14px; text-align:center; padding:12px;">Nenhuma contribuição confirmada.</div>';
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-title-row">
+        <h3 class="card-title" style="margin:0;">${esc(m.name)}</h3>
+        ${badge}
+      </div>
+      <div style="font-size:13px; color:var(--text-muted); line-height:1.7;">
+        ${m.memberCode ? `<div><strong>Código:</strong> <span style="font-family:monospace; color:var(--primary);">${esc(m.memberCode)}</span></div>` : ''}
+        ${memberLocLabel(m) ? `<div><strong>Local:</strong> ${memberLocLabel(m)}</div>` : ''}
+        <div><strong>Celular:</strong> ${m.phone ? esc(m.phone) : '—'}</div>
+        <div><strong>CPF:</strong> ${m.cpf ? esc(m.cpf) : '—'}</div>
+        <div><strong>E-mail:</strong> ${esc(m.email)}</div>
+        <div><strong>Login ativo:</strong> ${m.hasLogin ? 'Sim' : 'Não (aguardando completo)'}</div>
+      </div>
+      <div id="memberEditBox" style="display:none; margin-top:12px;"></div>
+      <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
+        <button class="btn btn-outline" style="flex:1;" onclick="toggleMemberEdit(${m.id})">Editar dados</button>
+        ${m.phone ? `<button class="btn btn-secondary" style="flex:1;" onclick="memberWhatsApp(${m.id}, 'agradecimento')">Agradecer</button>` : ''}
+        ${m.phone ? `<button class="btn btn-secondary" style="flex:1;" onclick="memberWhatsApp(${m.id}, 'felicitacao')">Felicitar</button>` : ''}
+      </div>
+    </div>
+    <div class="card">
+      <h3 class="card-title">Histórico de contribuições</h3>
+      <div class="confirm-grid" style="margin-bottom:12px;">
+        <div class="confirm-item"><div class="confirm-label">Total</div><div class="confirm-value">${fmtMoney(t.total || 0)}</div></div>
+        <div class="confirm-item"><div class="confirm-label">Dízimos</div><div class="confirm-value">${fmtMoney(t.dizimo || 0)}</div></div>
+        <div class="confirm-item"><div class="confirm-label">Ofertas</div><div class="confirm-value">${fmtMoney(t.oferta || 0)}</div></div>
+        <div class="confirm-item"><div class="confirm-label">Recibos</div><div class="confirm-value">${t.count || 0}</div></div>
+      </div>
+      ${rows}
+    </div>`;
+}
+
+function metaLabel(p) {
+  return p === 'pix' ? 'PIX' : p === 'cartao' ? 'Cartão' : 'Dinheiro';
+}
+
+function toggleMemberEdit(id) {
+  const box = $('memberEditBox');
+  const m = membersDetail && membersDetail.member;
+  if (!box || !m) return;
+  if (box.style.display !== 'none') { box.style.display = 'none'; box.innerHTML = ''; return; }
+  const congs = getManageableCongregations(currentUser);
+  const congOptions = '<option value="">Sem congregação</option>' + congs.map(c =>
+    `<option value="${c.id}" ${String(m.congregationId) === String(c.id) ? 'selected' : ''}>${esc(c.code)} — ${esc(c.name)}</option>`).join('');
+  box.style.display = 'block';
+  box.innerHTML = `
+    <div class="form-group"><label class="form-label">Nome</label><input class="form-input" id="memEditName" value="${esc(m.name)}"></div>
+    <div class="form-group"><label class="form-label">Celular</label><input class="form-input" id="memEditPhone" value="${esc(m.phone || '')}" placeholder="(00) 00000-0000"></div>
+    <div class="form-group"><label class="form-label">CPF</label><input class="form-input" id="memEditCpf" value="${esc(m.cpf || '')}"></div>
+    <div class="form-group"><label class="form-label">CEP</label><input class="form-input" id="memEditCep" value="${esc(m.cep || '')}"></div>
+    <div class="form-group"><label class="form-label">Número</label><input class="form-input" id="memEditNumber" value="${esc(m.addressNumber || '')}"></div>
+    ${currentUser?.role !== 'tesoureiro_congregacao' ? `<div class="form-group"><label class="form-label">Congregação</label><select class="form-select" id="memEditCong">${congOptions}</select></div>` : ''}
+    <button class="btn btn-primary" onclick="saveMemberEdit(${id})">Salvar</button>`;
+}
+
+async function saveMemberEdit(id) {
+  const body = {
+    name: $('memEditName').value.trim(),
+    phone: $('memEditPhone').value.trim() || null,
+    cpf: $('memEditCpf').value.trim() || null,
+    cep: $('memEditCep').value.trim() || null,
+    addressNumber: $('memEditNumber').value.trim() || null,
+  };
+  if ($('memEditCong')) {
+    const v = $('memEditCong').value;
+    body.congregationId = v ? Number(v) : null;
+  }
+  try {
+    await Api.put('/api/members/' + encodeURIComponent(id), body);
+    showToast('Dados atualizados', 'success');
+    await openMemberDetail(id);
+  } catch (e) {
+    apiErrorToast(e);
+  }
+}
+
+// Abre o recibo de uma contribuição do membro (reaproveita a tela de recibo).
+async function viewMemberReceipt(receiptId) {
+  try {
+    const out = await Api.get('/api/receipts/' + encodeURIComponent(receiptId));
+    if (!out.receipt) return showToast('Recibo não encontrado', 'error');
+    lastReceipt = out.receipt;
+    renderReceipt(out.receipt);
+    navigate('screenReceipt');
+  } catch (e) {
+    apiErrorToast(e);
+  }
+}
+
+// Mensagens de interação por WhatsApp (agradecimento / felicitação), editáveis.
+function memberWhatsApp(id, kind) {
+  const m = membersDetail && membersDetail.member && String(membersDetail.member.id) === String(id)
+    ? membersDetail.member
+    : memberById(id);
+  if (!m) return showToast('Membro não encontrado', 'error');
+  const phone = onlyDigits(m.phone || '');
+  if (phone.length < 10) return showToast('Membro sem celular cadastrado', 'warning');
+  const intl = '55' + phone;
+  const nome = String(m.name || '').split(' ')[0] || 'irmão(ã)';
+  const total = m.totals && m.totals.total ? fmtMoney(m.totals.total) : '';
+  let msg;
+  if (kind === 'felicitacao') {
+    msg = `A paz do Senhor, ${nome}! A Assembleia de Deus Missões se alegra com você e deseja as mais ricas bênçãos de Deus sobre a sua vida e a sua família. Felicitações!`;
+  } else {
+    msg = `A paz do Senhor, ${nome}! A Assembleia de Deus Missões agradece de coração pela sua contribuição${total ? ' (' + total + ')' : ''}. "Cada um contribua segundo tiver proposto no coração" (2 Coríntios 9:7). Deus te abençoe!`;
+  }
+  const custom = window.prompt('Mensagem para enviar (edite se quiser):', msg);
+  if (custom === null) return;
+  window.open('https://wa.me/' + intl + '?text=' + encodeURIComponent(custom || msg), '_blank');
+}
+
+function exportMembersExcel() {
+  if (typeof XLSX === 'undefined') return showToast('Exportação indisponível offline', 'error');
+  if (!membersData.length) return showToast('Nada para exportar', 'warning');
+  const header = ['Nome', 'Código', 'Celular', 'CPF', 'CEP', 'Número', 'Setor', 'Congregação', 'Cadastro', 'Login ativo', 'Total contribuído', 'Dízimos', 'Ofertas', 'Recibos'];
+  const rows = membersData.map(m => [
+    m.name,
+    m.memberCode || '',
+    m.phone || '',
+    m.cpf || '',
+    m.cep || '',
+    m.addressNumber || '',
+    m.sectorName || (m.sectorId ? String(m.sectorId).padStart(2, '0') : ''),
+    m.congregationCode || m.congregationName || '',
+    m.profileComplete ? 'Completo' : 'Incompleto',
+    m.hasLogin ? 'Sim' : 'Não',
+    m.totals ? m.totals.total : 0,
+    m.totals ? m.totals.dizimo : 0,
+    m.totals ? m.totals.oferta : 0,
+    m.totals ? m.totals.count : 0,
+  ]);
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+  ws['!cols'] = [{ wch: 28 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 10 }, { wch: 8 }, { wch: 16 }, { wch: 22 }, { wch: 12 }, { wch: 11 }, { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 8 }];
+  XLSX.utils.book_append_sheet(wb, ws, 'Membros');
+  const fileName = `Membros_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  XLSX.writeFile(wb, fileName);
+  showToast(`Planilha "${fileName}" gerada!`, 'success');
 }
 
 // Verifica se currentUser pode gerenciar o usuário-alvo

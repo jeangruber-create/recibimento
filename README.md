@@ -62,6 +62,9 @@ Depois abra `http://localhost:8080/index.html` (o front detecta a API em `http:/
 - **Confirmação do PIX (conciliação)**: o lançamento do membro nasce com situação **"Pendente"** e **não entra nos totais** (painel, fechamento semanal, prestação e limite de 40%). O **tesoureiro da congregação, tesoureiro de setor ou a sede** confirma o recebimento na tela **Lançamentos** (botão **"Confirmar PIX"**) ou no detalhe do recibo; a partir daí o valor passa a contar em todos os módulos. A confirmação grava **quem confirmou e quando** (auditoria).
 - **Chave PIX por congregação**: a sede e o tesoureiro de setor cadastram/editam a **chave PIX** (e o tipo) de cada congregação na tela **Cadastro de Congregações**. Sem chave, o portal do membro avisa que ela ainda não foi cadastrada (mas o lançamento já pode ser feito).
 - **Destaque do dízimo/oferta de casa**: a prestação de contas e os relatórios (Excel/impressão) mostram, separadamente, o total de **"Dízimos e ofertas de casa (membros)"** da semana (com a divisão entre dízimos e ofertas), além da marcação de origem **Membro (casa)** / Coleta em cada lançamento.
+- **Membros & Contatos (base consolidada)**: nova tela de gestão (menu **Gerenciar → Membros & Contatos**) que reúne **todos os membros e contatos**, tanto do **autocadastro completo** quanto dos **cadastros parciais feitos pelo coletor no balcão** (que agora são gravados no **banco**, visíveis para toda a liderança — não ficam mais presos no aparelho). A tela oferece **busca** (nome, código, CPF, celular), **filtros** (setor, congregação, cadastro completo/incompleto), **ordenação** (nome, maiores contribuintes, recentes), **resumo** (cadastrados, incompletos, contribuintes, total confirmado) e, por membro: **ficha com histórico de contribuições** (total, dízimos, ofertas, recibos), **edição de dados de contato**, **abertura do recibo** de qualquer contribuição e **mensagens de agradecimento/felicitação por WhatsApp** (texto editável). A lista pode ser **exportada em Excel**.
+- **Cadastro no balcão sem login imediato**: o cadastro parcial do coletor cria um membro no banco com **código ADM** e **sem login ativo** (e-mail provisório, senha aleatória). O acesso do fiel é liberado quando ele concluir o **autocadastro** informando os dados que faltam. O coletor **cadastra**, mas **não navega** pela base completa (a listagem é da liderança).
+- **Vínculo recibo ↔ membro**: cada recebimento passa a guardar também o **`personUserId`** (FK opcional), além do nome/código em texto. Isso permite **total exato por membro** na tela de Membros (recibos antigos continuam somando por código de membro).
 
 
 ### 4.1 Matriz de permissões por perfil
@@ -72,6 +75,8 @@ Depois abra `http://localhost:8080/index.html` (o front detecta a API em `http:/
 | Ver despesas | não | congregação inteira | congregações do seu setor | todos |
 | Lançar despesa | não | congregação inteira | congregações do seu setor | todos |
 | Cadastrar usuários | — | coletor + membro da congregação | coletor + membro + setor do setor | todos |
+| Membros & Contatos (listar/editar/exportar) | — | membros da própria congregação | membros do seu setor | todos |
+| Cadastrar membro no balcão (dados parciais) | sim (na própria congregação) | sim | sim | sim |
 | Cadastrar setores | — | — | — | sim |
 | Cadastrar/editar congregações | — | — | só as do **seu setor** | todas |
 | Chave PIX da congregação | — | — | só as do **seu setor** | todas |

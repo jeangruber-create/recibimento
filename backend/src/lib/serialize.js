@@ -41,6 +41,7 @@ function receipt(r) {
     person: {
       name: r.personName,
       memberCode: r.personMemberCode ?? null,
+      userId: r.personUserId ?? null,
       congregationId: r.congregationId,
     },
     type: r.type,
@@ -49,6 +50,7 @@ function receipt(r) {
     sectorId: r.sectorId,
     congregationId: r.congregationId,
     createdById: r.createdById ?? null,
+    personUserId: r.personUserId ?? null,
     date: iso(r.date),
     status: r.status,
     source: r.source ?? null,

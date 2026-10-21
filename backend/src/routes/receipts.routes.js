@@ -15,6 +15,7 @@ const createSchema = z.object({
   person: z.object({
     name: z.string().min(1),
     memberCode: z.string().optional().nullable(),
+    userId: z.number().int().positive().optional().nullable(),
   }),
   type: z.string().min(1),
   value: z.number().nonnegative(),
@@ -30,6 +31,7 @@ const updateSchema = z.object({
     .object({
       name: z.string().min(1),
       memberCode: z.string().optional().nullable(),
+      userId: z.number().int().positive().optional().nullable(),
     })
     .optional(),
   type: z.string().min(1).optional(),
@@ -91,6 +93,7 @@ router.post('/', async (req, res, next) => {
     // Membro: o recibo é sempre dele e sempre PIX (dízimo/oferta de casa).
     let personName = data.person.name;
     let personMemberCode = data.person.memberCode ?? null;
+    let personUserId = data.person.userId ?? null;
     let payment = data.payment || 'dinheiro';
     let status = data.status || 'confirmado';
     let source = null;
@@ -100,6 +103,7 @@ router.post('/', async (req, res, next) => {
       const self = memberSelfReceipt(req.user);
       personName = self.person.name;
       personMemberCode = self.person.memberCode;
+      personUserId = req.user.sub;
       payment = self.payment;
       // Dízimo/oferta de casa entra como pendente até a tesouraria confirmar o PIX.
       status = 'pendente';
@@ -112,6 +116,7 @@ router.post('/', async (req, res, next) => {
           number: data.number || generateNumber(),
           personName,
           personMemberCode,
+          personUserId,
           type: data.type,
           value: data.value,
           payment,
@@ -187,6 +192,7 @@ router.put('/:id', async (req, res, next) => {
           number: data.number ?? existing.number,
           personName: data.person?.name ?? existing.personName,
           personMemberCode: data.person ? data.person.memberCode ?? null : existing.personMemberCode,
+          personUserId: data.person ? data.person.userId ?? null : existing.personUserId,
           type: data.type ?? existing.type,
           value: data.value ?? existing.value,
           payment: data.payment ?? existing.payment,

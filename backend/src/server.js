@@ -18,6 +18,7 @@ const prestacaoRoutes = require('./routes/prestacoes.routes');
 const alertRoutes = require('./routes/alerts.routes');
 const profileRoutes = require('./routes/profile.routes');
 const publicRoutes = require('./routes/public.routes');
+const memberRoutes = require('./routes/members.routes');
 
 const app = express();
 
@@ -80,6 +81,7 @@ app.use('/api/closures', closureRoutes);
 app.use('/api/prestacoes', prestacaoRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/profile', profileRoutes);
+app.use('/api/members', memberRoutes);
 
 // ---- Front-end (implantação única: a API também serve a interface) ----
 // Injeta o API_BASE da mesma origem, para o front apontar para a própria hospedagem.
