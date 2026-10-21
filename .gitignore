@@ -6,6 +6,7 @@
 !/manifest.webmanifest
 !/sw.js
 !/icons/
+!/vendor/
 !/backend/
 !/neon.ts
 !/.neon

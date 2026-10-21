@@ -3,13 +3,14 @@
 //  - Navegação (HTML): network-first; se falhar, serve o cache (abre offline).
 //  - Estáticos (ícones, manifest, libs CDN): cache-first.
 //  - API (/api/*): nunca cacheia (sempre rede) — a fila offline cuida do reenvio.
-const CACHE = 'adm-v1';
+const CACHE = 'adm-v2';
 const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
+  '/vendor/qrcode.min.js',
   'https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js',
   'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js',

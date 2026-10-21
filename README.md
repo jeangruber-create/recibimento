@@ -93,6 +93,7 @@ para a própria origem (o backend injeta `window.ADM_API_BASE=""` no HTML).
 - `CORS_ORIGIN`: em produção, defina os domínios permitidos (ex.: `https://app.exemplo.com`). O cookie exige `credentials`, então não pode ficar `*`.
 - `JWT_SECRET`: **obrigatório** trocar por um valor forte (o backend recusa subir em produção com o valor padrão).
 - O `helmet` já vem com CSP ajustada para os scripts de CDN usados (SheetJS, qrcodejs, html5-qrcode).
+- **QR Code offline**: a lib `qrcodejs` é servida localmente em `/vendor/qrcode.min.js` (com fallback para o CDN). Assim o QR do membro e o PIX copia-e-cola continuam funcionando mesmo sem acesso ao CDN (rede móvel restrita/offline). Os 3 CDN continuam liberados na CSP.
 
 A sessão usa cookie http-only (`adm_token`). Em produção o cookie sai com `SameSite=Strict; Secure`,
 então a interface precisa ser servida pelo **mesmo domínio** da API (é o caso do servidor único abaixo).
@@ -231,7 +232,7 @@ Login: `admin@adm.org.br` / `123456`.
   750 horas grátis por mês e 5 GB de banda. **Neon**: o compute dorme após 5 min ocioso e acorda
   sozinho na primeira conexão — os dados ficam guardados.
 - `autoDeploy: true`: cada `git push` no GitHub já recompila e redesenha o serviço.
-- A CSP do `helmet` libera os 3 CDN que o front usa (SheetJS, qrcodejs, html5-qrcode).
+- A CSP do `helmet` libera os 3 CDN que o front usa (SheetJS, qrcodejs, html5-qrcode); o `qrcodejs` também é servido localmente (`/vendor/qrcode.min.js`) para funcionar offline.
 
 ### 6.5 (Opcional) Front em hospedagem separada
 
