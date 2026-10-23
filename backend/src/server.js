@@ -110,6 +110,7 @@ if (config.frontFile) {
     '/icons/icon-192.png': ['icons/icon-192.png', 'image/png'],
     '/icons/icon-512.png': ['icons/icon-512.png', 'image/png'],
     '/vendor/qrcode.min.js': ['vendor/qrcode.min.js', 'application/javascript; charset=utf-8'],
+    '/members-bulk-wa.js': ['members-bulk-wa.js', 'application/javascript; charset=utf-8'],
   };
   Object.entries(staticFiles).forEach(([route, [file, type]]) => {
     app.get(route, (req, res) => {
