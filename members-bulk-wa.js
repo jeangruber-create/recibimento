@@ -120,10 +120,14 @@
 
   function openModal(){
     var data = getList();
-    var checks0 = document.querySelectorAll('#membersList input[type=checkbox][data-mbwa="1"]:checked');
-    for(var c0=0;c0<checks0.length;c0++){
-      var cid0 = checks0[c0].getAttribute('data-id');
-      if(cid0) sel.add(String(cid0));
+    // Sincroniza sempre pelos checkboxes marcados
+    var allChecks = document.querySelectorAll('#membersList input[type=checkbox][data-mbwa="1"]');
+    sel.clear();
+    for(var cc=0;cc<allChecks.length;cc++){
+      if(allChecks[cc].checked){
+        var cid = allChecks[cc].getAttribute('data-id');
+        if(cid) sel.add(String(cid));
+      }
     }
     updateCount();
     markChecks();
@@ -131,6 +135,19 @@
     var list = [];
     for(var i=0;i<data.length;i++){
       if(sel.has(String(data[i].id)) && onlyDigits(data[i].phone).length >= 10) list.push(data[i]);
+    }
+    // Se não achou por data, tenta pelo próprio DOM (garantia)
+    if(list.length === 0){
+      var selMap = {};
+      for(var sc=0;sc<allChecks.length;sc++){
+        if(allChecks[sc].checked){
+          var sid = allChecks[sc].getAttribute('data-id');
+          if(sid) selMap[String(sid)] = true;
+        }
+      }
+      for(var di=0;di<data.length;di++){
+        if(selMap[String(data[di].id)] && onlyDigits(data[di].phone).length >= 10) list.push(data[di]);
+      }
     }
     if(list.length === 0){
       if(typeof window.showToast === 'function') window.showToast('Selecione pelo menos um membro com celular','warning');
@@ -150,16 +167,28 @@
 
     if(typeof window.showModal === 'function'){
       window.showModal('Enviar em lote por WhatsApp', html, function(){
-        var checks2 = document.querySelectorAll('#membersList input[type=checkbox][data-mbwa="1"]:checked');
-        for(var cc=0;cc<checks2.length;cc++){
-          var c2 = checks2[cc].getAttribute('data-id');
-          if(c2) sel.add(String(c2));
+        var allChecks2 = document.querySelectorAll('#membersList input[type=checkbox][data-mbwa="1"]');
+        sel.clear();
+        for(var cc2=0;cc2<allChecks2.length;cc2++){
+          if(allChecks2[cc2].checked){
+            var c2id = allChecks2[cc2].getAttribute('data-id');
+            if(c2id) sel.add(String(c2id));
+          }
         }
         var msgEl = document.getElementById('mbwa-msg');
         var msg = msgEl ? msgEl.value : '';
         if(!msg || !msg.trim()){ if(typeof window.showToast === 'function') window.showToast('Digite a mensagem','error'); return; }
         var selList = [];
         for(var j=0;j<data.length;j++){ if(sel.has(String(data[j].id)) && onlyDigits(data[j].phone).length >= 10) selList.push(data[j]); }
+        if(selList.length === 0){
+          var selMap2 = {};
+          for(var sc2=0;sc2<allChecks2.length;sc2++){
+            if(allChecks2[sc2].checked){ var sid2 = allChecks2[sc2].getAttribute('data-id'); if(sid2) selMap2[String(sid2)] = true; }
+          }
+          for(var di2=0;di2<data.length;di2++){
+            if(selMap2[String(data[di2].id)] && onlyDigits(data[di2].phone).length >= 10) selList.push(data[di2]);
+          }
+        }
         if(selList.length === 0){ if(typeof window.showToast === 'function') window.showToast('Nenhum membro com celular selecionado','warning'); return; }
         for(var k=0;k<selList.length;k++){
           (function(m,idx){
