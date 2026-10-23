@@ -119,8 +119,16 @@
   }
 
   function openModal(){
-    var list = [];
     var data = getList();
+    var checks0 = document.querySelectorAll('#membersList input[type=checkbox][data-mbwa="1"]:checked');
+    for(var c0=0;c0<checks0.length;c0++){
+      var cid0 = checks0[c0].getAttribute('data-id');
+      if(cid0) sel.add(String(cid0));
+    }
+    updateCount();
+    markChecks();
+
+    var list = [];
     for(var i=0;i<data.length;i++){
       if(sel.has(String(data[i].id)) && onlyDigits(data[i].phone).length >= 10) list.push(data[i]);
     }
@@ -142,11 +150,17 @@
 
     if(typeof window.showModal === 'function'){
       window.showModal('Enviar em lote por WhatsApp', html, function(){
+        var checks2 = document.querySelectorAll('#membersList input[type=checkbox][data-mbwa="1"]:checked');
+        for(var cc=0;cc<checks2.length;cc++){
+          var c2 = checks2[cc].getAttribute('data-id');
+          if(c2) sel.add(String(c2));
+        }
         var msgEl = document.getElementById('mbwa-msg');
         var msg = msgEl ? msgEl.value : '';
         if(!msg || !msg.trim()){ if(typeof window.showToast === 'function') window.showToast('Digite a mensagem','error'); return; }
         var selList = [];
         for(var j=0;j<data.length;j++){ if(sel.has(String(data[j].id)) && onlyDigits(data[j].phone).length >= 10) selList.push(data[j]); }
+        if(selList.length === 0){ if(typeof window.showToast === 'function') window.showToast('Nenhum membro com celular selecionado','warning'); return; }
         for(var k=0;k<selList.length;k++){
           (function(m,idx){
             var pn = String(m.name||'').split(/\s+/)[0] || 'irmão(ã)';
