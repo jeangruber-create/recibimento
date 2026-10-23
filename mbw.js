@@ -65,7 +65,7 @@
     if(typeof window.showModal!=='function'){toast('Modal indisponível','error');return;}
     window.showModal('Enviar em lote por WhatsApp', html, function(){
       var ta=document.getElementById('mbw-tx');var msg=ta?ta.value:'';
-      if(!msg||!msg.trim'){toast('Digite a mensagem','error');return;}
+      if(!msg||!msg.trim()){toast('Digite a mensagem','error');return;}
       var ch2=document.querySelectorAll('#membersList input[type=checkbox][data-mbwa="1"]:checked');
       if(!ch2||ch2.length===0){toast('Nenhum com celular marcado','warning');return;}
       var dt2=getData();var lst2=[];var seen2={};
