@@ -51,6 +51,7 @@
   }
   function send(){
     var ch=document.querySelectorAll('#membersList input[type=checkbox][data-mbwa="1"]:checked');
+    if(ch.length===0){ toast('Marque pelo menos um membro com celular','warning'); return; }
     var dt=getData();
     var lst=[]; var seen={};
     for(var x=0;x<ch.length;x++){
@@ -60,7 +61,7 @@
         if(String(dt[y].id)===String(id) && p(dt[y].phone).length>=10){ lst.push(dt[y]); seen[id]=true; break; }
       }
     }
-    if(lst.length===0){ toast('Marque pelo menos um membro com celular','warning'); return; }
+    if(lst.length===0){ toast('Os marcados não possuem celular ou não constam na lista','warning'); return; }
     var html='<div style="display:flex;flex-direction:column;gap:12px"><div style="font-size:13px;color:var(--text-muted)">'+lst.length+' marcado(s)</div><div class="form-group" style="margin:0"><label class="form-label">Modelo</label><select class="form-select" id="mbw-t"><option value="a">Agradecimento</option><option value="f">Felicitação/Bênçãos</option><option value="l">Personalizada</option></select></div><div class="form-group" style="margin:0"><label class="form-label">Mensagem</label><textarea class="form-input" id="mbw-tx" rows="8" style="resize:vertical"></textarea><div style="font-size:11px;color:var(--text-muted);margin-top:4px">Use {nome} ou {primeiro_nome}</div></div></div>';
     if(typeof window.showModal!=='function'){ toast('Modal indisponível','error'); return; }
     window.showModal('Enviar em lote por WhatsApp', html, function(){
