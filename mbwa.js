@@ -97,43 +97,33 @@
   }
 
   function enviar(){
-    var lst=lista();
-    if(lst.length===0){
-      // tenta ler direto dos checkboxes mesmo se não batou com membersData
-      var ch=document.querySelectorAll('#membersList input[type=checkbox][data-mbwa="1"]:checked');
-      var dt=data();
-      lst=[];
-      for(var x=0;x<ch.length;x++){
-        var id=ch[x].getAttribute('data-id');
-        for(var y=0;y<dt.length;y++){
-          if(String(dt[y].id)===String(id)){
-            lst.push(dt[y]); break;
-          }
-        }
-        if(lst.length===0 && dt.length===0){
-          // fallback: só gera pelo id se não tem data carregada? não consegue gerar link sem telefone
+    var ch=document.querySelectorAll('#membersList input[type=checkbox][data-mbwa="1"]:checked');
+    var dt=data();
+    var lst=[];
+    var seen={};
+    for(var x=0;x<ch.length;x++){
+      var id=ch[x].getAttribute('data-id');
+      if(!id||seen[id])continue;
+      for(var y=0;y<dt.length;y++){
+        if(String(dt[y].id)===String(id) && pn(dt[y].phone).length>=10){
+          lst.push(dt[y]); seen[id]=true; break;
         }
       }
     }
     if(lst.length===0){ toast('Marque pelo menos um membro com celular','warning'); return; }
-    // filtra com celular
-    var lstf=[];
-    for(var f=0;f<lst.length;f++){ if(pn(lst[f].phone).length>=10) lstf.push(lst[f]); }
-    if(lstf.length===0){ toast('Os marcados não possuem celular cadastrado','warning'); return; }
-    lst=lstf;
     var html='<div style="display:flex;flex-direction:column;gap:12px"><div style="font-size:13px;color:var(--text-muted)">'+lst.length+' marcado(s)</div><div class="form-group" style="margin:0"><label class="form-label">Modelo</label><select class="form-select" id="mbwa-t"><option value="agr">Agradecimento</option><option value="fel">Felicitação/Bênçãos</option><option value="liv">Personalizada</option></select></div><div class="form-group" style="margin:0"><label class="form-label">Mensagem</label><textarea class="form-input" id="mbwa-m" rows="8" style="resize:vertical"></textarea><div style="font-size:11px;color:var(--text-muted);margin-top:4px">Use {nome} ou {primeiro_nome}</div></div></div>';
     if(typeof window.showModal!=='function'){ toast('Modal indisponível','error'); return; }
     window.showModal('Enviar em lote por WhatsApp', html, function(){
       var ta=document.getElementById('mbwa-m'); var msg=ta?ta.value:'';
       if(!msg||!msg.trim()){ toast('Digite a mensagem','error'); return; }
-      var lst2=lista();
-      if(lst2.length===0){
-        var ch2=document.querySelectorAll('#membersList input[type=checkbox][data-mbwa="1"]:checked');
-        var dt2=data(); lst2=[];
-        for(var x2=0;x2<ch2.length;x2++){
-          var id2=ch2[x2].getAttribute('data-id');
-          for(var y2=0;y2<dt2.length;y2++){
-            if(String(dt2[y2].id)===String(id2) && pn(dt2[y2].phone).length>=10){ lst2.push(dt2[y2]); break; }
+      var ch2=document.querySelectorAll('#membersList input[type=checkbox][data-mbwa="1"]:checked');
+      var dt2=data(); var lst2=[]; var seen2={};
+      for(var x2=0;x2<ch2.length;x2++){
+        var id2=ch2[x2].getAttribute('data-id');
+        if(!id2||seen2[id2])continue;
+        for(var y2=0;y2<dt2.length;y2++){
+          if(String(dt2[y2].id)===String(id2) && pn(dt2[y2].phone).length>=10){
+            lst2.push(dt2[y2]); seen2[id2]=true; break;
           }
         }
       }
