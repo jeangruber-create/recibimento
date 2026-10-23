@@ -98,7 +98,7 @@
       s2.onchange=ap; ta2.oninput=function(){this.setAttribute('d','1');}; ap();
     },80);
   }
-  function run(){bar();cbs();cnt();}
+  function run(){try{bar();cbs();cnt();}catch(e){}}
   function pat(){
     if(window._mbw)return;
     if(typeof window.renderMembersList==='function'){
