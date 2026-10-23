@@ -84,31 +84,6 @@ app.use('/api/profile', profileRoutes);
 app.use('/api/members', memberRoutes);
 
 // Serve arquivo externo para seleção em lote WhatsApp (sempre disponível)
-app.get('/members-bulk-wa.js', (req, res) => {
-  try {
-    const fs = require('fs');
-    const path = require('path');
-    const candidates = [
-      path.resolve(process.cwd(), 'members-bulk-wa.js'),
-      path.resolve(__dirname, '../../members-bulk-wa.js'),
-    ];
-    if (config.frontFile) {
-      candidates.push(path.join(path.dirname(config.frontFile), 'members-bulk-wa.js'));
-    }
-    for (const p of candidates) {
-      if (fs.existsSync(p)) {
-        res.set('Content-Type', 'application/javascript; charset=utf-8')
-           .set('Cache-Control', 'no-cache, no-store, must-revalidate')
-           .send(fs.readFileSync(p, 'utf8'));
-        return;
-      }
-    }
-    return res.status(404).json({ error: 'Rota não encontrada' });
-  } catch (e) {
-    return res.status(500).json({ error: 'Erro ao servir members-bulk-wa.js' });
-  }
-});
-
 app.get('/mbwa.js', (req, res) => {
   try {
     const fs = require('fs');
@@ -131,6 +106,31 @@ app.get('/mbwa.js', (req, res) => {
     return res.status(404).json({ error: 'Rota não encontrada' });
   } catch (e) {
     return res.status(500).json({ error: 'Erro ao servir mbwa.js' });
+  }
+});
+
+app.get('/mbw.js', (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const candidates = [
+      path.resolve(process.cwd(), 'mbw.js'),
+      path.resolve(__dirname, '../../mbw.js'),
+    ];
+    if (config.frontFile) {
+      candidates.push(path.join(path.dirname(config.frontFile), 'mbw.js'));
+    }
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        res.set('Content-Type', 'application/javascript; charset=utf-8')
+           .set('Cache-Control', 'no-cache, no-store, must-revalidate')
+           .send(fs.readFileSync(p, 'utf8'));
+        return;
+      }
+    }
+    return res.status(404).json({ error: 'Rota não encontrada' });
+  } catch (e) {
+    return res.status(500).json({ error: 'Erro ao servir mbw.js' });
   }
 });
 
@@ -161,8 +161,8 @@ if (config.frontFile) {
     '/icons/icon-192.png': ['icons/icon-192.png', 'image/png'],
     '/icons/icon-512.png': ['icons/icon-512.png', 'image/png'],
     '/vendor/qrcode.min.js': ['vendor/qrcode.min.js', 'application/javascript; charset=utf-8'],
-    '/members-bulk-wa.js': ['members-bulk-wa.js', 'application/javascript; charset=utf-8'],
     '/mbwa.js': ['mbwa.js', 'application/javascript; charset=utf-8'],
+    '/mbw.js': ['mbw.js', 'application/javascript; charset=utf-8'],
   };
   Object.entries(staticFiles).forEach(([route, [file, type]]) => {
     app.get(route, (req, res) => {
