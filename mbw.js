@@ -98,7 +98,15 @@
       s2.onchange=ap; ta2.oninput=function(){this.setAttribute('d','1');}; ap();
     },80);
   }
-  function run(){try{bar();cbs();cnt();}catch(e){}}
+  function run(){
+    try{
+      bar();
+      cbs();
+      var ch=document.querySelectorAll('#membersList input[type=checkbox][data-mbwa="1"]:checked');
+      var el=document.getElementById('mbw-c');
+      if(el) el.textContent = (ch?ch.length:0) + ' marcado(s)';
+    }catch(e){}
+  }
   function pat(){
     if(window._mbw)return;
     if(typeof window.renderMembersList==='function'){
