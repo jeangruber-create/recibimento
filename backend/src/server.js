@@ -83,6 +83,32 @@ app.use('/api/alerts', alertRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/members', memberRoutes);
 
+// Serve arquivo externo para seleção em lote WhatsApp (sempre disponível)
+app.get('/members-bulk-wa.js', (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const candidates = [
+      path.resolve(process.cwd(), 'members-bulk-wa.js'),
+      path.resolve(__dirname, '../../members-bulk-wa.js'),
+    ];
+    if (config.frontFile) {
+      candidates.push(path.join(path.dirname(config.frontFile), 'members-bulk-wa.js'));
+    }
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        res.set('Content-Type', 'application/javascript; charset=utf-8')
+           .set('Cache-Control', 'no-cache, no-store, must-revalidate')
+           .send(fs.readFileSync(p, 'utf8'));
+        return;
+      }
+    }
+    return res.status(404).json({ error: 'Rota não encontrada' });
+  } catch (e) {
+    return res.status(500).json({ error: 'Erro ao servir members-bulk-wa.js' });
+  }
+});
+
 // ---- Front-end (implantação única: a API também serve a interface) ----
 // Injeta o API_BASE da mesma origem, para o front apontar para a própria hospedagem.
 if (config.frontFile) {
