@@ -60,12 +60,12 @@
         if(String(dt[y].id)===String(id) && p(dt[y].phone).length>=10){lst.push(dt[y]);seen[id]=true;break;}
       }
     }
-    if(lst.length===0){toast('Os marcados não possuem celular','warning');return;}
+    if(lst.length===0){toast('Os marcados não possuem celular cadastrado','warning');return;}
     var html='<div style="display:flex;flex-direction:column;gap:12px"><div style="font-size:13px;color:var(--text-muted)">'+lst.length+' marcado(s)</div><div class="form-group" style="margin:0"><label class="form-label">Modelo</label><select class="form-select" id="mbw-t"><option value="a">Agradecimento</option><option value="f">Felicitação/Bênçãos</option><option value="l">Personalizada</option></select></div><div class="form-group" style="margin:0"><label class="form-label">Mensagem</label><textarea class="form-input" id="mbw-tx" rows="8" style="resize:vertical"></textarea><div style="font-size:11px;color:var(--text-muted);margin-top:4px">Use {nome} ou {primeiro_nome}</div></div></div>';
     if(typeof window.showModal!=='function'){toast('Modal indisponível','error');return;}
     window.showModal('Enviar em lote por WhatsApp', html, function(){
       var ta=document.getElementById('mbw-tx');var msg=ta?ta.value:'';
-      if(!msg||!msg.trim()){toast('Digite a mensagem','error');return;}
+      if(!msg||!msg.trim'){toast('Digite a mensagem','error');return;}
       var ch2=document.querySelectorAll('#membersList input[type=checkbox][data-mbwa="1"]:checked');
       if(!ch2||ch2.length===0){toast('Nenhum com celular marcado','warning');return;}
       var dt2=getData();var lst2=[];var seen2={};
