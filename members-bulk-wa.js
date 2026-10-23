@@ -1,76 +1,73 @@
 (function(){
   'use strict';
 
-  var sel = new Set();
-
   function onlyDigits(s){ return String(s||'').replace(/\D/g,''); }
-  function esc(s){ if(s==null) return ''; return String(s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function fmtPhone(s){ var d = onlyDigits(s); if(d.length === 11) return d; if(d.length === 10) return d; if(d.length === 12 && d.indexOf('55')===0) return d.substr(2); if(d.length === 13 && d.indexOf('55')===0) return d.substr(2); return d; }
+  function getData(){ return (Array.isArray(window.membersData)) ? window.membersData : []; }
 
-  function getList(){ return (typeof window.membersData !== 'undefined' && Array.isArray(window.membersData)) ? window.membersData : []; }
-
-  function updateCount(){
-    var el = document.getElementById('mbwa-count');
-    if(el) el.textContent = sel.size + ' selecionado(s)';
+  function toast(msg,type){
+    if(typeof window.showToast === 'function') return window.showToast(msg,type||'info');
+    try{ alert(msg); }catch(e){}
   }
 
-  function injectUI(){
+  function injectBar(){
     var screen = document.getElementById('screenMembers');
     if(!screen) return;
-    if(screen.querySelector('#mbwa-bar')) return;
-
+    if(document.getElementById('mbwa-bar')) return;
     var cards = screen.querySelectorAll('.card');
-    var targetCard = null;
+    var target = null;
     for(var i=0;i<cards.length;i++){
-      if(cards[i].querySelector('#membersList')){ targetCard = cards[i]; break; }
+      if(cards[i].querySelector('#membersList')){ target = cards[i]; break; }
     }
-    if(!targetCard) return;
-
+    if(!target) return;
     var bar = document.createElement('div');
     bar.id = 'mbwa-bar';
-    bar.style.cssText = 'display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px;padding:10px;background:var(--card);border:1px solid var(--border);border-radius:12px;';
+    bar.style.cssText = 'display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;padding:10px 12px;background:rgba(0,0,0,0.02);border:1px solid var(--border);border-radius:12px;';
     bar.innerHTML = ''
-      + '<div style="font-size:13px;font-weight:600;">Selecionar para envio em lote por WhatsApp</div>'
+      + '<div style="font-weight:600;font-size:14px;">Envio em lote por WhatsApp</div>'
       + '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">'
-      + '  <button class="btn btn-ghost" style="padding:6px 10px;font-size:12px;" id="mbwa-selall">Selecionar com celular</button>'
-      + '  <button class="btn btn-ghost" style="padding:6px 10px;font-size:12px;" id="mbwa-clear">Limpar seleção</button>'
-      + '  <span id="mbwa-count" style="font-size:12px;color:var(--text-muted);">0 selecionado(s)</span>'
-      + '  <button class="btn btn-primary" style="padding:6px 10px;font-size:12px;" id="mbwa-open">Enviar em lote</button>'
+      + '  <button class="btn btn-ghost" style="padding:6px 10px;font-size:12px;" id="mbwa-mark">Marcar com celular</button>'
+      + '  <button class="btn btn-ghost" style="padding:6px 10px;font-size:12px;" id="mbwa-unmark">Desmarcar tudo</button>'
+      + '  <span id="mbwa-cnt" style="font-size:12px;color:var(--text-muted);">0 marcado(s)</span>'
+      + '  <button class="btn btn-primary" style="padding:6px 12px;font-size:12px;" id="mbwa-send">Enviar em lote</button>'
       + '</div>';
-
-    targetCard.insertBefore(bar, targetCard.firstChild);
-
-    document.getElementById('mbwa-selall').onclick = function(){
-      sel.clear();
-      var list = getList();
-      for(var j=0;j<list.length;j++){
-        if(onlyDigits(list[j].phone).length >= 10) sel.add(String(list[j].id));
-      }
-      updateCount();
-      markChecks();
-      if(typeof window.showToast === 'function') window.showToast(sel.size + ' selecionado(s) com celular', 'success');
-    };
-    document.getElementById('mbwa-clear').onclick = function(){
-      sel.clear();
-      updateCount();
-      markChecks();
-    };
-    document.getElementById('mbwa-open').onclick = openModal;
-    updateCount();
-    markChecks();
+    target.insertBefore(bar, target.firstChild);
+    document.getElementById('mbwa-mark').onclick = markAll;
+    document.getElementById('mbwa-unmark').onclick = unmarkAll;
+    document.getElementById('mbwa-send').onclick = openSend;
+    updateCnt();
   }
 
-  function markChecks(){
+  function markAll(){
     var checks = document.querySelectorAll('#membersList input[type=checkbox][data-mbwa="1"]');
+    var data = getData();
     for(var i=0;i<checks.length;i++){
       var id = checks[i].getAttribute('data-id');
-      if(sel.has(String(id))) checks[i].checked = true; else checks[i].checked = false;
+      for(var j=0;j<data.length;j++){
+        if(String(data[j].id)===String(id)){
+          if(fmtPhone(data[j].phone).length>=10){ checks[i].checked = true; } else { checks[i].checked = false; }
+          break;
+        }
+      }
     }
+    updateCnt();
+    toast(checks.length ? 'Marcados os que possuem celular' : 'Nenhum item na lista', 'info');
   }
 
-  function addCheckboxes(){
-    var listEl = document.getElementById('membersList');
-    if(!listEl) return;
-    var items = listEl.querySelectorAll('.list-item');
+  function unmarkAll(){
+    var checks = document.querySelectorAll('#membersList input[type=checkbox][data-mbwa="1"]');
+    for(var i=0;i<checks.length;i++) checks[i].checked = false;
+    updateCnt();
+  }
+
+  function updateCnt(){
+    var checks = document.querySelectorAll('#membersList input[type=checkbox][data-mbwa="1"]:checked');
+    var el = document.getElementById('mbwa-cnt');
+    if(el) el.textContent = checks.length + ' marcado(s)';
+  }
+
+  function addCbs(){
+    var items = document.querySelectorAll('#membersList .list-item');
     if(!items.length) return;
     for(var i=0;i<items.length;i++){
       var item = items[i];
@@ -79,185 +76,137 @@
       var info = item.querySelector('.list-item-info');
       if(info && info.getAttribute('onclick')){
         var m = info.getAttribute('onclick').match(/openMemberDetail\(([^)]+)\)/);
-        if(m) id = m[1];
+        if(m) id = m[1].replace(/['"]/g,'');
       }
       if(!id){
-        var btn = item.querySelector('button[onclick*="openMemberDetail"]');
-        if(btn && btn.getAttribute('onclick')){
-          var m2 = btn.getAttribute('onclick').match(/openMemberDetail\(([^)]+)\)/);
-          if(m2) id = m2[1];
+        var b = item.querySelector('button[onclick*="openMemberDetail"]');
+        if(b && b.getAttribute('onclick')){
+          var m2 = b.getAttribute('onclick').match(/openMemberDetail\(([^)]+)\)/);
+          if(m2) id = m2[1].replace(/['"]/g,'');
         }
       }
       if(!id) continue;
       var cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.setAttribute('data-mbwa','1');
-      cb.setAttribute('data-id', String(id).replace(/'/g,''));
-      cb.style.cssText = 'width:18px;height:18px;margin-right:10px;flex-shrink:0;';
+      cb.setAttribute('data-id', id);
+      cb.style.cssText = 'width:18px;height:18px;margin-right:12px;flex-shrink:0;';
       cb.onclick = function(e){ e.stopPropagation(); };
-      cb.onchange = function(){
-        var cid = this.getAttribute('data-id');
-        var list = getList();
-        var mem = null;
-        for(var x=0;x<list.length;x++){ if(String(list[x].id)===String(cid)){ mem=list[x]; break; } }
-        if(mem && onlyDigits(mem.phone).length < 10){
-          this.checked = false;
-          if(typeof window.showToast === 'function') window.showToast('Membro sem celular cadastrado','warning');
-          return;
-        }
-        if(this.checked) sel.add(String(cid)); else sel.delete(String(cid));
-        updateCount();
-      };
-      if(getComputedStyle(item).display !== 'flex'){
-        item.style.display = 'flex';
-        item.style.alignItems = 'center';
-      }
+      cb.onchange = updateCnt;
+      if(getComputedStyle(item).display !== 'flex'){ item.style.display='flex'; item.style.alignItems='center'; }
       item.insertBefore(cb, item.firstChild);
     }
-    updateCount();
-    markChecks();
+    updateCnt();
   }
 
-  function openModal(){
-    var data = getList();
-    // Sincroniza sempre pelos checkboxes marcados
-    var allChecks = document.querySelectorAll('#membersList input[type=checkbox][data-mbwa="1"]');
-    sel.clear();
-    for(var cc=0;cc<allChecks.length;cc++){
-      if(allChecks[cc].checked){
-        var cid = allChecks[cc].getAttribute('data-id');
-        if(cid) sel.add(String(cid));
-      }
-    }
-    updateCount();
-    markChecks();
-
+  function getCheckedList(){
+    var checks = document.querySelectorAll('#membersList input[type=checkbox][data-mbwa="1"]:checked');
+    var data = getData();
     var list = [];
-    for(var i=0;i<data.length;i++){
-      if(sel.has(String(data[i].id)) && onlyDigits(data[i].phone).length >= 10) list.push(data[i]);
-    }
-    // Se não achou por data, tenta pelo próprio DOM (garantia)
-    if(list.length === 0){
-      var selMap = {};
-      for(var sc=0;sc<allChecks.length;sc++){
-        if(allChecks[sc].checked){
-          var sid = allChecks[sc].getAttribute('data-id');
-          if(sid) selMap[String(sid)] = true;
+    var seen = {};
+    for(var i=0;i<checks.length;i++){
+      var id = checks[i].getAttribute('data-id');
+      if(!id || seen[id]) continue;
+      for(var j=0;j<data.length;j++){
+        if(String(data[j].id)===String(id)){
+          if(fmtPhone(data[j].phone).length>=10){
+            list.push(data[j]);
+            seen[id] = true;
+          }
+          break;
         }
       }
-      for(var di=0;di<data.length;di++){
-        if(selMap[String(data[di].id)] && onlyDigits(data[di].phone).length >= 10) list.push(data[di]);
-      }
     }
-    if(list.length === 0){
-      if(typeof window.showToast === 'function') window.showToast('Selecione pelo menos um membro com celular','warning');
+    return list;
+  }
+
+  function openSend(){
+    var list = getCheckedList();
+    if(list.length===0){
+      toast('Selecione pelo menos um membro com celular marcado', 'warning');
       return;
     }
     var html = ''
-      + '<div style="display:flex;flex-direction:column;gap:10px;">'
-      + '  <div style="font-size:13px;color:var(--text-muted);">' + list.length + ' contato(s) selecionado(s)</div>'
-      + '  <div class="form-group" style="margin:0;"><label class="form-label">Modelo</label>'
-      + '    <select class="form-select" id="mbwa-model"><option value="agradecimento">Agradecimento pela contribuição</option><option value="felicitacao">Felicitação / Bênçãos</option><option value="personalizada">Personalizada (editável)</option></select>'
+      + '<div style="display:flex;flex-direction:column;gap:12px;">'
+      + '  <div style="font-size:13px;color:var(--text-muted);">' + list.length + ' contato(s) com celular selecionado(s)</div>'
+      + '  <div class="form-group" style="margin:0;"><label class="form-label">Modelo de mensagem</label>'
+      + '    <select class="form-select" id="mbwa-tpl"><option value="agradecimento">Agradecimento pela contribuição</option><option value="felicitacao">Felicitação / Bênçãos</option><option value="livre">Mensagem livre</option></select>'
       + '  </div>'
       + '  <div class="form-group" style="margin:0;"><label class="form-label">Mensagem</label>'
-      + '    <textarea class="form-input" id="mbwa-msg" rows="7" style="resize:vertical;"></textarea>'
-      + '    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Use {nome} ou {primeiro_nome}</div>'
+      + '    <textarea class="form-input" id="mbwa-txt" rows="8" style="resize:vertical;"></textarea>'
+      + '    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Variáveis: {nome}, {primeiro_nome}</div>'
       + '  </div>'
       + '</div>';
 
     if(typeof window.showModal === 'function'){
       window.showModal('Enviar em lote por WhatsApp', html, function(){
-        var allChecks2 = document.querySelectorAll('#membersList input[type=checkbox][data-mbwa="1"]');
-        sel.clear();
-        for(var cc2=0;cc2<allChecks2.length;cc2++){
-          if(allChecks2[cc2].checked){
-            var c2id = allChecks2[cc2].getAttribute('data-id');
-            if(c2id) sel.add(String(c2id));
-          }
-        }
-        var msgEl = document.getElementById('mbwa-msg');
-        var msg = msgEl ? msgEl.value : '';
-        if(!msg || !msg.trim()){ if(typeof window.showToast === 'function') window.showToast('Digite a mensagem','error'); return; }
-        var selList = [];
-        for(var j=0;j<data.length;j++){ if(sel.has(String(data[j].id)) && onlyDigits(data[j].phone).length >= 10) selList.push(data[j]); }
-        if(selList.length === 0){
-          var selMap2 = {};
-          for(var sc2=0;sc2<allChecks2.length;sc2++){
-            if(allChecks2[sc2].checked){ var sid2 = allChecks2[sc2].getAttribute('data-id'); if(sid2) selMap2[String(sid2)] = true; }
-          }
-          for(var di2=0;di2<data.length;di2++){
-            if(selMap2[String(data[di2].id)] && onlyDigits(data[di2].phone).length >= 10) selList.push(data[di2]);
-          }
-        }
-        if(selList.length === 0){ if(typeof window.showToast === 'function') window.showToast('Nenhum membro com celular selecionado','warning'); return; }
-        for(var k=0;k<selList.length;k++){
+        var txtEl = document.getElementById('mbwa-txt');
+        var msg = txtEl ? txtEl.value : '';
+        if(!msg || !msg.trim()){ toast('Digite a mensagem', 'error'); return; }
+        var sel2 = getCheckedList();
+        if(sel2.length===0){ toast('Nenhum com celular selecionado', 'warning'); return; }
+        for(var k=0;k<sel2.length;k++){
           (function(m,idx){
-            var pn = String(m.name||'').split(/\s+/)[0] || 'irmão(ã)';
-            var txt = msg.replace(/\{primeiro_nome\}/gi,pn).replace(/\{nome\}/gi,pn);
-            setTimeout(function(){ window.open('https://wa.me/55' + onlyDigits(m.phone) + '?text=' + encodeURIComponent(txt), '_blank'); }, idx*400);
-          })(selList[k], k);
+            var pn = String(m.name||'').trim().split(/\s+/)[0] || 'irmão(ã)';
+            var t = msg.replace(/\{primeiro_nome\}/gi,pn).replace(/\{nome\}/gi,pn);
+            var phone = fmtPhone(m.phone);
+            setTimeout(function(){ window.open('https://wa.me/55'+phone+'?text='+encodeURIComponent(t), '_blank'); }, idx*450);
+          })(sel2[k], k);
         }
-        if(typeof window.showToast === 'function') window.showToast('Abrindo WhatsApp...', 'success');
+        toast('Abrindo ' + sel2.length + ' conversa(s) no WhatsApp...', 'success');
       });
       setTimeout(function(){
-        var modelEl = document.getElementById('mbwa-model');
-        var msgEl = document.getElementById('mbwa-msg');
-        if(!modelEl || !msgEl) return;
-        function setTpl(){
-          if(msgEl.getAttribute('data-edited')==='1') return;
-          var v = modelEl.value;
-          if(v==='felicitacao') msgEl.value = 'A paz do Senhor, {primeiro_nome}! A Assembleia de Deus Missões deseja as mais ricas bênçãos sobre sua vida e sua família!';
-          else if(v==='personalizada') msgEl.value = 'A paz do Senhor, {primeiro_nome}!';
-          else msgEl.value = 'A paz do Senhor, {primeiro_nome}! A Assembleia de Deus Missões agradece de coração pela sua contribuição. "Cada um contribua segundo tiver proposto no coração" (2 Coríntios 9:7). Deus te abençoe abundantemente!';
+        var tpl = document.getElementById('mbwa-tpl');
+        var txt = document.getElementById('mbwa-txt');
+        if(!tpl || !txt) return;
+        function apply(){
+          if(txt.getAttribute('data-ed')==='1') return;
+          var v = tpl.value;
+          if(v==='felicitacao') txt.value = 'A paz do Senhor, {primeiro_nome}! A Assembleia de Deus Missões deseja as mais ricas bênçãos sobre sua vida e sua família!';
+          else if(v==='livre') txt.value = 'A paz do Senhor, {primeiro_nome}!';
+          else txt.value = 'A paz do Senhor, {primeiro_nome}! A Assembleia de Deus Missões agradece de coração pela sua contribuição. "Cada um contribua segundo tiver proposto no coração" (2 Coríntios 9:7). Deus te abençoe abundantemente!';
         }
-        modelEl.onchange = setTpl;
-        msgEl.oninput = function(){ this.setAttribute('data-edited','1'); };
-        setTpl();
-      }, 100);
+        tpl.onchange = apply;
+        txt.oninput = function(){ this.setAttribute('data-ed','1'); };
+        apply();
+      }, 80);
+    }else{
+      toast('Modal indisponível', 'error');
     }
   }
 
   function run(){
-    injectUI();
-    addCheckboxes();
+    injectBar();
+    addCbs();
+    updateCnt();
   }
 
-  function patchRender(){
-    if(window._mbwaRenderPatched) return;
+  function patch(){
+    if(window._mbwaPatched) return;
     if(typeof window.renderMembersList === 'function'){
       var orig = window.renderMembersList;
       window.renderMembersList = function(){
-        var res = orig.apply(this, arguments);
+        var r = orig.apply(this, arguments);
         try{ run(); }catch(e){}
-        try{ setTimeout(run, 30); setTimeout(run, 150); setTimeout(run, 400); }catch(e){}
-        return res;
+        setTimeout(run,50); setTimeout(run,150); setTimeout(run,400);
+        return r;
       };
-      window._mbwaRenderPatched = true;
-      console.log('[MBWA] renderMembersList patchado');
-      return true;
+      window._mbwaPatched = true;
     }
-    return false;
   }
 
-  var origNavigate = window.navigate;
-  if(typeof origNavigate === 'function' && !window._mbwaNavPatched){
+  var origNav = window.navigate;
+  if(typeof origNav === 'function' && !window._mbwaNav){
     window.navigate = function(id){
-      var r = origNavigate.apply(this, arguments);
-      if(id === 'screenMembers'){ 
-        setTimeout(run, 200); 
-        setTimeout(run, 400); 
-        setTimeout(run, 800);
-      }
+      var r = origNav.apply(this, arguments);
+      if(id==='screenMembers'){ setTimeout(run,200); setTimeout(run,500); setTimeout(run,900); }
       return r;
     };
-    window._mbwaNavPatched = true;
+    window._mbwaNav = true;
   }
 
-  if(document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', function(){ patchRender(); run(); setTimeout(run, 800); });
-  }else{
-    patchRender(); run(); setTimeout(run, 800);
-  }
-  var t=0; var iv = setInterval(function(){ t++; patchRender(); run(); if(t>20) clearInterval(iv); }, 500);
-  console.log('[MBWA] carregado');
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', function(){ patch(); run(); });
+  else { patch(); run(); }
+  var c=0; var iv=setInterval(function(){ c++; patch(); run(); if(c>15) clearInterval(iv); }, 600);
+  console.log('[MBWA] pronto');
 })();
