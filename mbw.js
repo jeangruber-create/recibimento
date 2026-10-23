@@ -38,9 +38,9 @@
         if(String(dt[y].id)===String(id)&&p(dt[y].phone).length>=10){lst.push(dt[y]);seen[id]=true;break;}
       }
     }
-    if(lst.length===0){toast('Os marcados não possuem celular cadastrado','warning');return;}
-    var html='<div style=\"display:flex;flex-direction:column;gap:12px\"><div style=\"font-size:13px;color:var(--text-muted)\">'+lst.length+' marcado(s)</div><div class=\"form-group\" style=\"margin:0\"><label class=\"form-label\">Modelo</label><select class=\"form-select\" id=\"mbw-t\"><option value=\"a\">Agradecimento</option><option value=\"f\">Felicitação/Bênçãos</option><option value=\"l\">Personalizada</option></select></div><div class=\"form-group\" style=\"margin:0\"><label class=\"form-label\">Mensagem</label><textarea class=\"form-input\" id=\"mbw-tx\" rows=\"8\" style=\"resize:vertical\"></textarea><div style=\"font-size:11px;color:var(--text-muted);margin-top:4px\">Use {nome} ou {primeiro_nome}</div></div></div>';
-    if(typeof window.showModal!=='function'){toast('Modal indisponível','error');return;}
+    if(lst.length===0){toast('Os marcados nï¿½o possuem celular cadastrado','warning');return;}
+    var html='<div style=\"display:flex;flex-direction:column;gap:12px\"><div style=\"font-size:13px;color:var(--text-muted)\">'+lst.length+' marcado(s)</div><div class=\"form-group\" style=\"margin:0\"><label class=\"form-label\">Modelo</label><select class=\"form-select\" id=\"mbw-t\"><option value=\"a\">Agradecimento</option><option value=\"f\">Felicitaï¿½ï¿½o/Bï¿½nï¿½ï¿½os</option><option value=\"l\">Personalizada</option></select></div><div class=\"form-group\" style=\"margin:0\"><label class=\"form-label\">Mensagem</label><textarea class=\"form-input\" id=\"mbw-tx\" rows=\"8\" style=\"resize:vertical\"></textarea><div style=\"font-size:11px;color:var(--text-muted);margin-top:4px\">Use {nome} ou {primeiro_nome}</div></div></div>';
+    if(typeof window.showModal!=='function'){toast('Modal indisponï¿½vel','error');return;}
     window.showModal('Enviar em lote por WhatsApp', html, function(){
       var ta=document.getElementById('mbw-tx');var msg=ta?ta.value:'';
       if(!msg||!msg.trim()){toast('Digite a mensagem','error');return;}
@@ -56,7 +56,7 @@
       if(lst2.length===0){toast('Nenhum com celular marcado','warning');return;}
       for(var k=0;k<lst2.length;k++){
         (function(m,idx){
-          var pn2=String(m.name||'').trim().split(/\s+/)[0]||'irmão(ã)';
+          var pn2=String(m.name||'').trim().split(/\s+/)[0]||'irmï¿½o(ï¿½)';
           var t=msg.replace(/\{primeiro_nome\}/gi,pn2).replace(/\{nome\}/gi,pn2);
           var ph=p(m.phone);
           setTimeout(function(){window.open('https://wa.me/55'+ph+'?text='+encodeURIComponent(t),'_blank');},idx*450);
@@ -68,14 +68,24 @@
       var s2=document.getElementById('mbw-t');var ta2=document.getElementById('mbw-tx');
       if(!s2||!ta2)return;
       function ap(){if(ta2.getAttribute('d')==='1')return;var v=s2.value;
-        if(v==='f')ta2.value='A paz do Senhor, {primeiro_nome}! A Assembleia de Deus Missões deseja as mais ricas bênçãos sobre sua vida e sua família!';
+        if(v==='f')ta2.value='A paz do Senhor, {primeiro_nome}! A Assembleia de Deus Missï¿½es deseja as mais ricas bï¿½nï¿½ï¿½os sobre sua vida e sua famï¿½lia!';
         else if(v==='l')ta2.value='A paz do Senhor, {primeiro_nome}!';
-        else ta2.value='A paz do Senhor, {primeiro_nome}! A Assembleia de Deus Missões agradece de coração pela sua contribuição. \"Cada um contribua segundo tiver proposto no coração\" (2 Coríntios 9:7). Deus te abençoe abundantemente!';
+        else ta2.value='A paz do Senhor, {primeiro_nome}! A Assembleia de Deus Missï¿½es agradece de coraï¿½ï¿½o pela sua contribuiï¿½ï¿½o. \"Cada um contribua segundo tiver proposto no coraï¿½ï¿½o\" (2 Corï¿½ntios 9:7). Deus te abenï¿½oe abundantemente!';
       }
       s2.onchange=ap;ta2.oninput=function(){this.setAttribute('d','1');};ap();
     },80);
   }
-  function run(){try{bar();cbs();upd();}catch(e){}}
+  function run(){
+    try{
+      var sc=document.getElementById('screenMembers');
+      if(!sc) return;
+      bar();
+      cbs();
+      var ch=document.querySelectorAll('#membersList input[type=checkbox][data-mbwa="1"]:checked');
+      var el=document.getElementById('mbw-c');
+      if(el) el.textContent = (ch?ch.length:0)+' marcado(s)';
+    }catch(e){}
+  }
   function pat(){if(window._mbw)return;if(typeof window.renderMembersList==='function'){var o=window.renderMembersList;window.renderMembersList=function(){var r=o.apply(this,arguments);try{run();}catch(e){}setTimeout(run,50);setTimeout(run,200);setTimeout(run,600);return r;};window._mbw=true;}}
   var onv=window.navigate;if(typeof onv==='function'&&!window._mbwn){window.navigate=function(id){var r=onv.apply(this,arguments);if(id==='screenMembers'){setTimeout(run,200);setTimeout(run,600);setTimeout(run,1000);}return r;};window._mbwn=true;}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){pat();run();});else{pat();run();}
