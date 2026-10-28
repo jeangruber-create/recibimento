@@ -233,7 +233,44 @@ router.post('/:id/reject', async (req, res, next) => {
   }
 });
 
-router.post('/:id/receive', async (req, res, next) => {
+router.get('/admin/summary', async (req, res, next) => {
+  try {
+    if (req.user.role !== 'sede') throw httpError(403, 'Apenas a sede');
+    const weekStart = resolveWeekStart(req.query.week);
+    const { weekBounds } = require('../lib/week');
+    const { start, end } = weekBounds(weekStart);
+    const sectors = await prisma.sector.findMany({ orderBy: { id: 'asc' } });
+    const prestacoes = await prisma.prestacao.findMany({ where: { weekStart }, include: { sector: true } });
+    const map = new Map(prestacoes.map(p => [p.sectorId, p]));
+    const rows = [];
+    for (const sector of sectors) {
+      const p = map.get(sector.id);
+      const computed = await prestacaoComputed(sector.id, weekStart);
+      rows.push({
+        sectorId: sector.id,
+        sectorName: sector.name,
+        status: p ? p.status : 'pending',
+        hasPrestacao: !!p,
+        declaredCash: p ? Number(p.declaredCash) : 0,
+        declaredPix: p ? Number(p.declaredPix || 0) : 0,
+        expectedCash: computed.expectedCash,
+        expectedPix: computed.pixIncome,
+        submittedAt: p?.submittedAt || null,
+        receivedAt: p?.receivedAt || null,
+        reviewedAt: p?.reviewedAt || null,
+        reviewNote: p?.reviewNote || '',
+        receivedNote: p?.receivedNote || '',
+        prestacaoId: p?.id || null
+      });
+    }
+    const closed = rows.filter(r => r.status === 'received' || r.status === 'approved').length;
+    const pending = rows.filter(r => r.status === 'pending').length;
+    const submitted = rows.filter(r => r.status === 'submitted').length;
+    res.json({ week: weekStart.toISOString(), weekStart: start.toISOString(), weekEnd: end.toISOString(), closed, pending, submitted, total: sectors.length, sectors: rows });
+  } catch (e) {
+    next(e);
+  }
+});
   try {
     if (req.user.role !== 'sede') throw httpError(403, 'Apenas a sede pode recepcionar prestações');
     const body = z.object({ note: z.string().optional() }).parse(req.body || {});
