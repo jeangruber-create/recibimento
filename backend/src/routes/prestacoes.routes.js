@@ -233,7 +233,65 @@ router.post('/:id/reject', async (req, res, next) => {
   }
 });
 
-router.post('/:id/reopen', async (req, res, next) => {
+router.post('/:id/receive', async (req, res, next) => {
+  try {
+    if (req.user.role !== 'sede') throw httpError(403, 'Apenas a sede pode recepcionar prestações');
+    const body = z.object({ note: z.string().optional() }).parse(req.body || {});
+    const prestacao = await prisma.prestacao.findUnique({ where: { id: req.params.id } });
+    if (!prestacao) throw httpError(404, 'Prestação não encontrada');
+    if (prestacao.status !== 'submitted' && prestacao.status !== 'approved') throw httpError(400, 'Prestação não está apta para recebimento');
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.prestacao.update({
+        where: { id: prestacao.id },
+        data: { status: 'received', receivedById: req.user.sub || null, receivedAt: new Date(), receivedNote: body.note || '' },
+      });
+      await logAudit(tx, {
+        user: req.user,
+        action: 'prestacao.receive',
+        entity: 'Prestacao',
+        entityId: prestacao.id,
+        sectorId: prestacao.sectorId,
+        summary: 'Prestação recebida pela Sede',
+        before: { status: prestacao.status },
+        after: { status: 'received' },
+      });
+      return u;
+    });
+    res.json({ prestacao: serializePrestacao(updated) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/:id/return', async (req, res, next) => {
+  try {
+    if (req.user.role !== 'sede') throw httpError(403, 'Apenas a sede pode devolver prestações');
+    const body = z.object({ note: z.string().min(1) }).parse(req.body || {});
+    const prestacao = await prisma.prestacao.findUnique({ where: { id: req.params.id } });
+    if (!prestacao) throw httpError(404, 'Prestação não encontrada');
+    if (prestacao.status !== 'submitted') throw httpError(400, 'Prestação não está aguardando análise');
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.prestacao.update({
+        where: { id: prestacao.id },
+        data: { status: 'rejected', reviewedBy: req.user.name || '', reviewedAt: new Date(), reviewNote: body.note },
+      });
+      await logAudit(tx, {
+        user: req.user,
+        action: 'prestacao.return',
+        entity: 'Prestacao',
+        entityId: prestacao.id,
+        sectorId: prestacao.sectorId,
+        summary: body.note,
+        before: { status: prestacao.status },
+        after: { status: 'rejected' },
+      });
+      return u;
+    });
+    res.json({ prestacao: serializePrestacao(updated) });
+  } catch (e) {
+    next(e);
+  }
+});
   try {
     if (req.user.role !== 'sede') throw httpError(403, 'Apenas a sede pode reabrir prestações');
     const prestacao = await prisma.prestacao.findUnique({ where: { id: req.params.id } });
