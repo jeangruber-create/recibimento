@@ -625,7 +625,7 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
     <div class="card">
       <h3 class="card-title">Painel de Gerenciamento</h3>
       <div style="font-size:14px; color:var(--text-muted); margin-bottom:16px;" id="adminRoleInfo">—</div>
-      <div style="display:flex; flex-direction:column; gap:12px;" id="adminMenu">
+      <div style="display:flex; flex-direction:column; gap:12px;" id="adminMenu"><button id="adm-weekly-btn" class="btn btn-secondary" onclick="navigate('screenAdminWeeklyReceipts')" style="text-align:left;justify-content:flex-start;">Recepcionar Fechamentos Semanais</button>
         <!-- Preenchido via JS conforme hierarquia -->
       </div>
     </div>
@@ -691,6 +691,21 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
       <h3 class="card-title">Usuários Cadastrados</h3>
       <div id="usersList"></div>
     </div>
+  </section>
+
+  <!-- SCREEN: RECEPCIONAR FECHAMENTOS SEMANAIS (SEDE) -->
+  <section class="screen screen--board" id="screenAdminWeeklyReceipts" data-title="Recepcionar Fechamentos Semanais">
+    <div class="card card--wide" style="padding:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <button class="btn btn-ghost" style="padding:6px 10px;" onclick="shiftAdminWeekly(-1)">‹ Anterior</button>
+        <div style="text-align:center;"><div style="font-weight:700;color:var(--primary);" id="adminWeeklyLabel">—</div><div style="font-size:11px;color:var(--text-muted);">Segunda a Domingo</div></div>
+        <button class="btn btn-ghost" style="padding:6px 10px;" onclick="shiftAdminWeekly(1)">Próxima ›</button>
+      </div>
+      <button class="btn btn-ghost" style="width:100%;margin-top:8px;font-size:12px;" onclick="goCurrentAdminWeekly()">Ir para semana atual</button>
+    </div>
+    <div class="card"><h3 class="card-title">Resumo por Setor <span id="adminWeeklyMeta" style="font-weight:400;color:var(--text-muted);font-size:13px;"></span></h3><div class="confirm-grid" style="grid-template-columns:1fr 1fr 1fr 1fr;"><div class="confirm-item"><div class="confirm-label">Total Setores</div><div class="confirm-value" id="awrTotal">0</div></div><div class="confirm-item"><div class="confirm-label">Enviados</div><div class="confirm-value" id="awrSubmitted">0</div></div><div class="confirm-item"><div class="confirm-label">Recepcionados</div><div class="confirm-value" id="awrClosed">0</div></div><div class="confirm-item"><div class="confirm-label">Pendentes</div><div class="confirm-value" style="color:var(--gold,#D4A843);" id="awrPending">0</div></div></div></div>
+    <div class="card card--wide"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><h3 class="card-title" style="margin:0;">Situação por Setor</h3><button class="btn btn-ghost" style="font-size:12px;padding:4px 10px;" onclick="renderAdminWeeklyReceipts()">Atualizar</button></div><div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr style="background:var(--bg);"><th style="text-align:left;padding:8px;border:1px solid var(--border);">Setor</th><th style="text-align:center;padding:8px;border:1px solid var(--border);">Status</th><th style="text-align:right;padding:8px;border:1px solid var(--border);">Caixa</th><th style="text-align:right;padding:8px;border:1px solid var(--border);">PIX/POS</th><th style="text-align:center;padding:8px;border:1px solid var(--border);">Enviado em</th><th style="text-align:center;padding:8px;border:1px solid var(--border);">Recepcionado em</th><th style="text-align:center;padding:8px;border:1px solid var(--border);">Ações</th></tr></thead><tbody id="awrTable"></tbody></table></div></div>
+    <button class="btn btn-ghost" style="width:100%;" onclick="navigate('screenAdmin')">Voltar ao Gerenciar</button>
   </section>
 
   <!-- SCREEN: MEMBROS / CONTATOS (base consolidada, interações e histórico) -->
@@ -3030,6 +3045,7 @@ function navigate(screenId) {
   if (screenId === 'screenCongregationRegister') renderCongregationRegisterScreen();
   if (screenId === 'screenDashboard') renderDashboard();
   if (screenId === 'screenWeeklyClose') renderWeeklyClose();
+  if (screenId === 'screenAdminWeeklyReceipts') renderAdminWeeklyReceipts();
   if (screenId === 'screenMember') renderMemberPortal();
   if (screenId === 'screenMembers') renderMembersScreen();
   if (screenId === 'screenMemberDetail') renderMemberDetailScreen();
