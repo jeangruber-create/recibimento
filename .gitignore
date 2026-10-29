@@ -1,9 +1,11 @@
 /*
 !/.gitignore
+!/app.js
 !/index.html
 !/README.md
 !/render.yaml
 !/manifest.webmanifest
+!/mbw.js
 !/sw.js
 !/icons/
 !/vendor/
