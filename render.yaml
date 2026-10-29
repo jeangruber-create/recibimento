@@ -5,7 +5,7 @@ services:
   - type: web
     name: adm-recebimentos-api
     runtime: node
-    rootDir: recebimento-adm/backend
+    rootDir: backend
     plan: free
     buildCommand: npm install && npx prisma generate && npx prisma migrate deploy
     startCommand: npm start
