@@ -26,6 +26,17 @@ const mbwOverride = require('./routes/mbw-override');
 mbwOverride(app);
 
 app.set('trust proxy', config.trustProxy ? 1 : false);
+
+// Forçar não-cachear HTML para evitar vazamento de código antigo
+app.use((req, res, next) => {
+  if (req.method === 'GET' && (req.path === '/' || req.path.endsWith('.html'))) {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+  }
+  next();
+});
+
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -165,6 +176,31 @@ app.get('/mbw.js', (req, res) => {
     return res.status(404).json({ error: 'Rota não encontrada' });
   } catch (e) {
     return res.status(500).json({ error: 'Erro ao servir mbw.js' });
+  }
+});
+
+app.get('/app.js', (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const candidates = [
+      path.resolve(process.cwd(), 'app.js'),
+      path.resolve(__dirname, '../../app.js'),
+    ];
+    if (config.frontFile) {
+      candidates.push(path.join(path.dirname(config.frontFile), 'app.js'));
+    }
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        res.set('Content-Type', 'application/javascript; charset=utf-8')
+           .set('Cache-Control', 'no-cache, no-store, must-revalidate')
+           .send(fs.readFileSync(p, 'utf8'));
+        return;
+      }
+    }
+    return res.status(404).json({ error: 'Rota nao encontrada' });
+  } catch (e) {
+    return res.status(500).json({ error: 'Erro ao servir app.js' });
   }
 });
 
