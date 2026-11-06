@@ -1,4 +1,20 @@
 
+// ============ BADGE DE VERSAO (discreto) ============
+function showVersionBadge() {
+  let badge = document.getElementById('versionBadge');
+  if (!badge) {
+    badge = document.createElement('div');
+    badge.id = 'versionBadge';
+    badge.style.cssText = 'position:fixed;bottom:4px;right:6px;font-size:9px;color:rgba(0,0,0,0.35);z-index:9999;pointer-events:none;font-family:monospace;';
+    document.body.appendChild(badge);
+  }
+  badge.textContent = 'v' + APP_VERSION;
+}
+
+// ============ VERSAO DO SISTEMA ============
+const APP_VERSION = '2026-11-06-v3';
+const APP_BUILD = '375563a';
+
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
   id: i + 1,
@@ -5500,6 +5516,8 @@ navigate = function(screenId) {
 
 // INIT
 async function init() {
+  // Exibe versao discreta no rodape
+  showVersionBadge();
   initSpeech();
   initOfflineSync();
   registerServiceWorker();
