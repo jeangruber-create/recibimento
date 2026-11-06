@@ -669,7 +669,7 @@ const SpeechService = {
   // (o Chrome mobile fecha o reconhecimento com frequência).
   autoRestart: true,
   restartAttempts: 0,
-  maxRestartAttempts: 10,
+  maxRestartAttempts: 50,
   stoppedByUser: false,
 
   init() {
@@ -706,18 +706,29 @@ const SpeechService = {
 
       // Se o navegador encerrou sozinho e o usuário não pediu para parar,
       // e ainda não processamos nada, reinicia a escuta (mantém a sessão viva).
-      if (!this.hasProcessed && !this.stoppedByUser && this.autoRestart) {
+      // No mobile, o navegador fecha o reconhecimento com frequencia.
+      // Reiniciamos imediatamente para manter a escuta continua.
+      // So processamos quando o usuario parar explicitamente.
+      if (!this.stoppedByUser && this.autoRestart) {
         if (this.restartAttempts < this.maxRestartAttempts) {
           this.restartAttempts++;
           console.log('[Speech onend] Encerrado pelo navegador; reiniciando escuta (tentativa ' + this.restartAttempts + '/' + this.maxRestartAttempts + ')...');
-          const delay = Math.min(300 * this.restartAttempts, 2000);
+          // Reinicia imediatamente (sem delay) para evitar gap na escuta
           setTimeout(() => {
-            if (!this.isRecording && !this.stoppedByUser && !this.hasProcessed) {
+            if (!this.isRecording && !this.stoppedByUser) {
               try { this.recognition.start(); } catch (e) {
                 console.log('[Speech onend] Falha ao reiniciar:', e.message);
+                // Tenta novamente apos 500ms
+                setTimeout(() => {
+                  if (!this.isRecording && !this.stoppedByUser) {
+                    try { this.recognition.start(); } catch (e2) {
+                      console.log('[Speech onend] Falha ao reiniciar (2a tentativa):', e2.message);
+                    }
+                  }
+                }, 500);
               }
             }
-          }, delay);
+          }, 0);
           return;
         } else {
           console.log('[Speech onend] Maximo de tentativas de reinicio atingido');
