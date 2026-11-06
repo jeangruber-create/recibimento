@@ -8,12 +8,12 @@ function showVersionBadge() {
     badge.style.cssText = 'position:fixed;bottom:4px;right:6px;font-size:10px;color:rgba(0,0,0,0.5);z-index:9999;pointer-events:none;font-family:monospace;background:rgba(255,255,255,0.7);padding:2px 6px;border-radius:4px;';
     document.body.appendChild(badge);
   }
-  badge.textContent = 'v' + APP_VERSION + ' (' + APP_BUILD + ')';
+  badge.textContent = 'v' + APP_VERSION + ' | commit ' + APP_BUILD;
 }
 
 // ============ VERSAO DO SISTEMA ============
 const APP_VERSION = '2026-11-06-v5';
-const APP_BUILD = '75001bb';
+const APP_BUILD = 'c88e484';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
