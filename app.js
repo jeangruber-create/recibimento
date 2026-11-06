@@ -13,7 +13,7 @@ function showVersionBadge() {
 
 // ============ VERSAO DO SISTEMA ============
 const APP_VERSION = '2026-11-06-v6';
-const APP_BUILD = 'mobilefix2';
+const APP_BUILD = '2a3a1a2';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
