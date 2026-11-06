@@ -12,8 +12,8 @@ function showVersionBadge() {
 }
 
 // ============ VERSAO DO SISTEMA ============
-const APP_VERSION = '2026-11-06-v4';
-const APP_BUILD = 'c1736f6';
+const APP_VERSION = '2026-11-06-v5';
+const APP_BUILD = 'mobilefix';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
@@ -671,6 +671,8 @@ const SpeechService = {
   restartAttempts: 0,
   maxRestartAttempts: 50,
   stoppedByUser: false,
+  _isRestart: false,
+  _watchdog: null,
 
   init() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -688,68 +690,64 @@ const SpeechService = {
 
     this.recognition.onstart = () => {
       this.isRecording = true;
-      this.finalText = '';
-      this.interimText = '';
-      this.hasProcessed = false;
-      this.stoppedByUser = false;
-      $('btnVoice').classList.add('recording');
-      $('voiceText').textContent = 'Ouvindo... (pode falar com calma; para finalizar, toque novamente)';
+      if (!this._isRestart) {
+        // Início novo pelo usuário: limpa tudo
+        this.finalText = '';
+        this.interimText = '';
+        this.hasProcessed = false;
+        this.stoppedByUser = false;
+        this.restartAttempts = 0;
+        $('btnVoice').classList.add('recording');
+        $('voiceText').textContent = 'Ouvindo... (toque no microfone para finalizar)';
+        this.resetMaxTimer();
+      }
+      // Reinício automático: preserva texto acumulado
+      this._isRestart = false;
       this.resetSilenceTimer();
-      this.resetMaxTimer();
+      this._startWatchdog();
     };
 
     this.recognition.onend = () => {
+      this._clearWatchdog();
       this.clearSilenceTimer();
-      this.clearMaxTimer();
-      const wasRecording = this.isRecording;
+      console.log('[Speech onend] final:', JSON.stringify(this.finalText), '| interim:', JSON.stringify(this.interimText), '| stopped:', this.stoppedByUser);
+
+      // Usuário parou explicitamente: processa
+      if (this.stoppedByUser) {
+        this.isRecording = false;
+        this.clearMaxTimer();
+        this._finalize();
+        return;
+      }
+
+      // Navegador encerrou sozinho (muito comum no mobile): reinicia preservando texto
+      if (this.autoRestart && !this.hasProcessed && this.restartAttempts < this.maxRestartAttempts) {
+        this.restartAttempts++;
+        this._isRestart = true;
+        // Incorpora interim ao final para não perder
+        if (this.interimText.trim()) {
+          const t = this.interimText.trim();
+          const f = this.finalText.trim();
+          if (t && !f.toLowerCase().endsWith(t.toLowerCase())) {
+            this.finalText = (f ? f + ' ' : '') + t;
+          }
+          this.interimText = '';
+        }
+        // Mantém visual de gravação ativo
+        $('btnVoice').classList.add('recording');
+        $('voiceText').textContent = '🎤 ' + (this.finalText.trim() || 'Ouvindo...');
+        setTimeout(() => this._doRestart(), 100);
+        return;
+      }
+
+      // Sem mais tentativas
       this.isRecording = false;
-      console.log('[Speech onend] finalText:', JSON.stringify(this.finalText), '| interimText:', JSON.stringify(this.interimText), '| hasProcessed:', this.hasProcessed);
-
-      // Se o navegador encerrou sozinho e o usuário não pediu para parar,
-      // e ainda não processamos nada, reinicia a escuta (mantém a sessão viva).
-      // No mobile, o navegador fecha o reconhecimento com frequencia.
-      // Reiniciamos imediatamente para manter a escuta continua.
-      // So processamos quando o usuario parar explicitamente.
-      if (wasRecording && !this.stoppedByUser && this.autoRestart) {
-        if (this.restartAttempts < this.maxRestartAttempts) {
-          this.restartAttempts++;
-          console.log('[Speech onend] Encerrado pelo navegador; reiniciando escuta (tentativa ' + this.restartAttempts + '/' + this.maxRestartAttempts + ')...');
-          // Reinicia imediatamente (sem delay) para evitar gap na escuta
-          setTimeout(() => {
-            if (!this.stoppedByUser && !this.hasProcessed) {
-              try { this.recognition.start(); } catch (e) {
-                console.log('[Speech onend] Falha ao reiniciar:', e.message);
-                // Tenta novamente apos 500ms
-                setTimeout(() => {
-                  if (!this.stoppedByUser && !this.hasProcessed) {
-                    try { this.recognition.start(); } catch (e2) {
-                      console.log('[Speech onend] Falha ao reiniciar (2a tentativa):', e2.message);
-                    }
-                  }
-                }, 500);
-              }
-            }
-          }, 0);
-          return;
-        } else {
-          console.log('[Speech onend] Maximo de tentativas de reinicio atingido');
-        }
-      }
-
-      if (!this.hasProcessed) {
-        // Prioriza finalText; se vazio, usa interimText (fallback)
-        const textToProcess = this.finalText.trim() || this.interimText.trim();
-        console.log('[Speech onend] Processando:', JSON.stringify(textToProcess));
-        if (textToProcess) {
-          this.hasProcessed = true;
-          this.processTranscript(textToProcess);
-        }
-      }
-      $('btnVoice').classList.remove('recording');
-      $('voiceText').textContent = 'Toque e fale';
+      this.clearMaxTimer();
+      this._finalize();
     };
 
     this.recognition.onresult = (e) => {
+      this.resetSilenceTimer();
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const transcript = e.results[i][0].transcript;
@@ -835,20 +833,86 @@ const SpeechService = {
     }
   },
 
+  _doRestart() {
+    if (this.stoppedByUser || this.hasProcessed) return;
+    try {
+      this.recognition.start();
+    } catch (e) {
+      console.log('[Speech restart] erro, recriando instancia:', e.message);
+      try {
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const old = this.recognition;
+        const r = new SR();
+        r.lang = 'pt-BR'; r.continuous = true; r.interimResults = true;
+        r.onstart = old.onstart; r.onend = old.onend; r.onresult = old.onresult; r.onerror = old.onerror;
+        this.recognition = r;
+        this._isRestart = true;
+        r.start();
+      } catch (e2) {
+        console.log('[Speech restart] falha total', e2.message);
+        this.isRecording = false;
+        this.clearMaxTimer();
+        this._finalize();
+      }
+    }
+  },
+
+  _startWatchdog() {
+    this._clearWatchdog();
+    // No mobile, às vezes onend não dispara - força verificação
+    this._watchdog = setTimeout(() => {
+      if (this.isRecording && !this.stoppedByUser && !this.hasProcessed) {
+        console.log('[Speech watchdog] reiniciando por inatividade');
+        try { this.recognition.stop(); } catch(e) { try { this.recognition.abort(); } catch(e2) {} }
+      }
+    }, 12000);
+  },
+  _clearWatchdog() { if (this._watchdog) { clearTimeout(this._watchdog); this._watchdog = null; } },
+
+  _finalize() {
+    this._clearWatchdog();
+    if (!this.hasProcessed) {
+      const textToProcess = (this.finalText + ' ' + this.interimText).trim();
+      console.log('[Speech finalize]', JSON.stringify(textToProcess));
+      if (textToProcess) {
+        this.hasProcessed = true;
+        this.processTranscript(textToProcess);
+      }
+    }
+    $('btnVoice').classList.remove('recording');
+    $('voiceText').textContent = 'Toque e fale';
+  },
+
   // Interface pública
   start() {
     if (!this.isSupported) return showToast('Reconhecimento de voz não disponível', 'error');
     if (this.isRecording) return this.stop();
+    this._isRestart = false;
     this.stoppedByUser = false;
-    try { this.recognition.start(); } catch (e) { /* já iniciado */ }
+    this.hasProcessed = false;
+    this.finalText = '';
+    this.interimText = '';
+    this.restartAttempts = 0;
+    try { this.recognition.start(); } catch (e) {
+      // Pode precisar recriar
+      try {
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const old = this.recognition;
+        const r = new SR();
+        r.lang = 'pt-BR'; r.continuous = true; r.interimResults = true;
+        r.onstart = old.onstart; r.onend = old.onend; r.onresult = old.onresult; r.onerror = old.onerror;
+        this.recognition = r;
+        r.start();
+      } catch(e2) { console.log('[Speech start]', e2.message); }
+    }
   },
 
   stop() {
-    this.restartAttempts = 0;
     this.stoppedByUser = true;
+    this._clearWatchdog();
     this.clearSilenceTimer();
     this.clearMaxTimer();
-    if (this.recognition) this.recognition.stop();
+    if (this.recognition) try { this.recognition.stop(); } catch(e) {}
   },
 
   // Comando de voz: "corrigir" — zera dados e reinicia gravação
@@ -5585,28 +5649,41 @@ init();
 function fix(){
   var nav=document.getElementById('bottombar');
   if(!nav)return;
+  // Previne "Touch to Search" / seleção no Android Chrome
+  if(!nav._bfNav){
+    nav._bfNav=true;
+    nav.style.touchAction='manipulation';
+    nav.style.webkitTapHighlightColor='transparent';
+    nav.addEventListener('contextmenu',function(e){e.preventDefault();},{passive:false});
+    nav.addEventListener('selectstart',function(e){e.preventDefault();},{passive:false});
+  }
   var btns=nav.querySelectorAll('.nav-btn');
   for(var i=0;i<btns.length;i++){
-    var b=btns[i];
-    b.setAttribute('type','button');
-    b.style.touchAction='manipulation';
-    b.style.webkitTapHighlightColor='transparent';
-    if(b._bf)continue;
-    b._bf=true;
-    var fn=b.getAttribute('onclick');
-    b.removeAttribute('onclick');
-    var handler=function(e){
-      try{e.preventDefault();e.stopPropagation();}catch(ex){}
-      if(fn){
-        try{var c=fn.replace(/return\s*false\s*;?$/,'');(new Function(c))();}catch(ex){console.error('nav click error',ex);}
+    (function(b){
+      b.setAttribute('type','button');
+      b.style.touchAction='manipulation';
+      b.style.webkitTapHighlightColor='transparent';
+      b.style.webkitTouchCallout='none';
+      b.style.webkitUserSelect='none';
+      b.style.userSelect='none';
+      if(b._bf)return;
+      b._bf=true;
+      var fn=b.getAttribute('onclick');
+      b.removeAttribute('onclick');
+      function run(){
+        if(!fn)return;
+        try{var c=fn.replace(/return\s*false\s*;?$/,'');(new Function(c))();}
+        catch(ex){console.error('nav click error',ex,fn);}
       }
-      return false;
-    };
-    b.addEventListener('touchstart',function(e){e.preventDefault();},{passive:false});
-    b.addEventListener('touchend',handler,{passive:false});
-    b.addEventListener('click',handler);
+      var handled=false;
+      b.addEventListener('touchstart',function(e){handled=false;e.stopPropagation();},{passive:true});
+      b.addEventListener('touchend',function(e){e.preventDefault();e.stopPropagation();if(handled)return;handled=true;run();setTimeout(function(){handled=false;},400);},{passive:false});
+      b.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();if(handled)return;handled=true;run();setTimeout(function(){handled=false;},400);});
+      b.addEventListener('contextmenu',function(e){e.preventDefault();});
+    })(btns[i]);
   }
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',fix);else fix();
-setInterval(fix,800);
+setInterval(fix,600);
+window.__bottombarFix=fix;
 })();

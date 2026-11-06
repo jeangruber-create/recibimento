@@ -71,7 +71,9 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
     padding-right: max(24px, calc((100% - var(--container)) / 2));
   }
   .app .bottombar { justify-content: center; gap: 18px; }
-  .app .nav-btn { flex: 0 0 auto; padding: 6px 16px; font-size: 11px; touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
+  .app .nav-btn { flex: 0 0 auto; padding: 6px 16px; font-size: 11px; touch-action: manipulation; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+  .nav-btn * { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+  .bottombar { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
   .screen {
     align-items: center;
     padding-left: max(24px, calc((100% - var(--container)) / 2));
@@ -168,7 +170,7 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
 .list-item-badge { background: var(--primary); color: white; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
 
 /* Voice Recording */
-.voice-btn { position: relative; }
+.voice-btn { touch-action: manipulation; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;  position: relative; }
 .voice-btn.recording { background: var(--error); animation: pulse 1s infinite; }
 .voice-btn.recording svg { animation: spin 1s linear infinite; }
 @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(198,40,40,0.4); } 50% { box-shadow: 0 0 0 16px rgba(198,40,40,0); } }
