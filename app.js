@@ -12,8 +12,8 @@ function showVersionBadge() {
 }
 
 // ============ VERSAO DO SISTEMA ============
-const APP_VERSION = '2026-11-06-v5';
-const APP_BUILD = 'c88e484';
+const APP_VERSION = '2026-11-06-v6';
+const APP_BUILD = 'mobilefix2';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
@@ -685,7 +685,7 @@ const SpeechService = {
     this.isSupported = true;
     this.recognition = new SR();
     this.recognition.lang = 'pt-BR';
-    this.recognition.continuous = true;
+    this.recognition.continuous = false;
     this.recognition.interimResults = true;
 
     this.recognition.onstart = () => {
@@ -843,7 +843,7 @@ const SpeechService = {
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
         const old = this.recognition;
         const r = new SR();
-        r.lang = 'pt-BR'; r.continuous = true; r.interimResults = true;
+        r.lang = 'pt-BR'; r.continuous = false; r.interimResults = true;
         r.onstart = old.onstart; r.onend = old.onend; r.onresult = old.onresult; r.onerror = old.onerror;
         this.recognition = r;
         this._isRestart = true;
@@ -899,7 +899,7 @@ const SpeechService = {
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
         const old = this.recognition;
         const r = new SR();
-        r.lang = 'pt-BR'; r.continuous = true; r.interimResults = true;
+        r.lang = 'pt-BR'; r.continuous = false; r.interimResults = true;
         r.onstart = old.onstart; r.onend = old.onend; r.onresult = old.onresult; r.onerror = old.onerror;
         this.recognition = r;
         r.start();
@@ -5676,7 +5676,7 @@ function fix(){
         catch(ex){console.error('nav click error',ex,fn);}
       }
       var handled=false;
-      b.addEventListener('touchstart',function(e){handled=false;e.stopPropagation();},{passive:true});
+      b.addEventListener('touchstart',function(e){handled=false;e.preventDefault();e.stopPropagation();},{passive:false});
       b.addEventListener('touchend',function(e){e.preventDefault();e.stopPropagation();if(handled)return;handled=true;run();setTimeout(function(){handled=false;},400);},{passive:false});
       b.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();if(handled)return;handled=true;run();setTimeout(function(){handled=false;},400);});
       b.addEventListener('contextmenu',function(e){e.preventDefault();});
