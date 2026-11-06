@@ -5549,3 +5549,6 @@ async function init() {
 
 init();
 
+
+// ============ BOTTOMBAR MOBILE FIX ============
+(function(){'use strict';function fix(){var nav=document.getElementById('bottombar');if(!nav)return;var btns=nav.querySelectorAll('.nav-btn');for(var i=0;i<btns.length;i++){var b=btns[i];b.setAttribute('type','button');b.style.touchAction='manipulation';b.style.webkitTapHighlightColor='transparent';if(b._bf)continue;b._bf=true;var hnd=function(e){try{e.preventDefault();e.stopPropagation();}catch(ex){}var fn=b.getAttribute('onclick');if(fn){try{var c=fn.replace(/return\s*false\s*;?$/,'');(new Function(c)).call(b);}catch(ex){}}return false;};b.addEventListener('touchend',hnd,{passive:false});b.addEventListener('click',hnd,{passive:false});}}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',fix);else fix();setInterval(fix,800);})();
