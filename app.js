@@ -699,9 +699,10 @@ const SpeechService = {
     };
 
     this.recognition.onend = () => {
-      this.isRecording = false;
       this.clearSilenceTimer();
       this.clearMaxTimer();
+      const wasRecording = this.isRecording;
+      this.isRecording = false;
       console.log('[Speech onend] finalText:', JSON.stringify(this.finalText), '| interimText:', JSON.stringify(this.interimText), '| hasProcessed:', this.hasProcessed);
 
       // Se o navegador encerrou sozinho e o usuário não pediu para parar,
@@ -709,18 +710,18 @@ const SpeechService = {
       // No mobile, o navegador fecha o reconhecimento com frequencia.
       // Reiniciamos imediatamente para manter a escuta continua.
       // So processamos quando o usuario parar explicitamente.
-      if (!this.stoppedByUser && this.autoRestart) {
+      if (wasRecording && !this.stoppedByUser && this.autoRestart) {
         if (this.restartAttempts < this.maxRestartAttempts) {
           this.restartAttempts++;
           console.log('[Speech onend] Encerrado pelo navegador; reiniciando escuta (tentativa ' + this.restartAttempts + '/' + this.maxRestartAttempts + ')...');
           // Reinicia imediatamente (sem delay) para evitar gap na escuta
           setTimeout(() => {
-            if (!this.isRecording && !this.stoppedByUser) {
+            if (!this.stoppedByUser && !this.hasProcessed) {
               try { this.recognition.start(); } catch (e) {
                 console.log('[Speech onend] Falha ao reiniciar:', e.message);
                 // Tenta novamente apos 500ms
                 setTimeout(() => {
-                  if (!this.isRecording && !this.stoppedByUser) {
+                  if (!this.stoppedByUser && !this.hasProcessed) {
                     try { this.recognition.start(); } catch (e2) {
                       console.log('[Speech onend] Falha ao reiniciar (2a tentativa):', e2.message);
                     }
