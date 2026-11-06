@@ -645,13 +645,15 @@ const SpeechService = {
   hasProcessed: false,
   // Tempo de silêncio antes de encerrar a captura (ms). Ampliado para dar tempo
   // de ditar todos os dados sem que a escuta feche no meio da fala.
-  silenceMs: 20000,
+  silenceMs: 30000,
   // Limite duro de duração da gravação (ms), evita sessão aberta para sempre.
   maxMs: 180000,
   maxTimer: null,
   // Reinicia a escuta automaticamente quando o navegador encerra sozinho
   // (o Chrome mobile fecha o reconhecimento com frequência).
   autoRestart: true,
+  restartAttempts: 0,
+  maxRestartAttempts: 10,
   stoppedByUser: false,
 
   init() {
@@ -689,13 +691,21 @@ const SpeechService = {
       // Se o navegador encerrou sozinho e o usuário não pediu para parar,
       // e ainda não processamos nada, reinicia a escuta (mantém a sessão viva).
       if (!this.hasProcessed && !this.stoppedByUser && this.autoRestart) {
-        console.log('[Speech onend] Encerrado pelo navegador; reiniciando escuta...');
-        setTimeout(() => {
-          if (!this.isRecording && !this.stoppedByUser && !this.hasProcessed) {
-            try { this.recognition.start(); } catch (e) {}
-          }
-        }, 300);
-        return;
+        if (this.restartAttempts < this.maxRestartAttempts) {
+          this.restartAttempts++;
+          console.log('[Speech onend] Encerrado pelo navegador; reiniciando escuta (tentativa ' + this.restartAttempts + '/' + this.maxRestartAttempts + ')...');
+          const delay = Math.min(300 * this.restartAttempts, 2000);
+          setTimeout(() => {
+            if (!this.isRecording && !this.stoppedByUser && !this.hasProcessed) {
+              try { this.recognition.start(); } catch (e) {
+                console.log('[Speech onend] Falha ao reiniciar:', e.message);
+              }
+            }
+          }, delay);
+          return;
+        } else {
+          console.log('[Speech onend] Maximo de tentativas de reinicio atingido');
+        }
       }
 
       if (!this.hasProcessed) {
@@ -806,6 +816,7 @@ const SpeechService = {
   },
 
   stop() {
+    this.restartAttempts = 0;
     this.stoppedByUser = true;
     this.clearSilenceTimer();
     this.clearMaxTimer();
