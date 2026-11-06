@@ -663,7 +663,7 @@ const SpeechService = {
   // de ditar todos os dados sem que a escuta feche no meio da fala.
   silenceMs: 30000,
   // Limite duro de duração da gravação (ms), evita sessão aberta para sempre.
-  maxMs: 180000,
+  maxMs: 300000,
   maxTimer: null,
   // Reinicia a escuta automaticamente quando o navegador encerra sozinho
   // (o Chrome mobile fecha o reconhecimento com frequência).
@@ -5569,4 +5569,32 @@ init();
 
 
 // ============ BOTTOMBAR MOBILE FIX ============
-(function(){'use strict';function fix(){var nav=document.getElementById('bottombar');if(!nav)return;var btns=nav.querySelectorAll('.nav-btn');for(var i=0;i<btns.length;i++){var b=btns[i];b.setAttribute('type','button');b.style.touchAction='manipulation';b.style.webkitTapHighlightColor='transparent';if(b._bf)continue;b._bf=true;var hnd=function(e){try{e.preventDefault();e.stopPropagation();}catch(ex){}var fn=b.getAttribute('onclick');if(fn){try{var c=fn.replace(/return\s*false\s*;?$/,'');(new Function(c)).call(b);}catch(ex){}}return false;};b.addEventListener('touchend',hnd,{passive:false});b.addEventListener('click',hnd,{passive:false});}}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',fix);else fix();setInterval(fix,800);})();
+(function(){'use strict';
+function fix(){
+  var nav=document.getElementById('bottombar');
+  if(!nav)return;
+  var btns=nav.querySelectorAll('.nav-btn');
+  for(var i=0;i<btns.length;i++){
+    var b=btns[i];
+    b.setAttribute('type','button');
+    b.style.touchAction='manipulation';
+    b.style.webkitTapHighlightColor='transparent';
+    if(b._bf)continue;
+    b._bf=true;
+    var fn=b.getAttribute('onclick');
+    b.removeAttribute('onclick');
+    var handler=function(e){
+      try{e.preventDefault();e.stopPropagation();}catch(ex){}
+      if(fn){
+        try{var c=fn.replace(/return\s*false\s*;?$/,'');(new Function(c))();}catch(ex){console.error('nav click error',ex);}
+      }
+      return false;
+    };
+    b.addEventListener('touchstart',function(e){e.preventDefault();},{passive:false});
+    b.addEventListener('touchend',handler,{passive:false});
+    b.addEventListener('click',handler);
+  }
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',fix);else fix();
+setInterval(fix,800);
+})();
