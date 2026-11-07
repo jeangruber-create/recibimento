@@ -12,8 +12,8 @@ function showVersionBadge() {
 }
 
 // ============ VERSAO DO SISTEMA ============
-const APP_VERSION = '2026-11-07-v8';
-const APP_BUILD = 'daf6296';
+const APP_VERSION = '2026-11-07-v9';
+const APP_BUILD = 'stt-mobile';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
@@ -1060,9 +1060,19 @@ const SpeechService = {
   },
 
   // Interface pública
-  start() {
-    if (!this.sttChecked) this._checkStt();
+  _isMobile() {
+    try { return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/i.test(navigator.userAgent)); } catch(e){ return false; }
+  },
+  async start() {
     if (this.isRecording) return this.stop();
+    if (!this.sttChecked) { try { await this._checkStt(); } catch(e){} }
+    // Em celular, se STT do servidor estiver habilitado, usa gravação compatível (mais confiável)
+    if (this.sttEnabled && this._isMobile()) {
+      this._sttTriedAsFallback = false;
+      this._fallbackActive = false;
+      this._hideVoiceNotice();
+      return this.startMediaRecording({ reason: 'Modo compatível (celular).' });
+    }
     if (!this.isSupported) {
       if (this.sttEnabled) return this.startMediaRecording({ reason: 'Navegador sem Web Speech; usando gravação compatível.' });
       return this.triggerFallback('Navegador sem suporte ao ditado por voz.');
@@ -1075,9 +1085,9 @@ const SpeechService = {
     this.restartAttempts = 0;
     this._failCount = 0;
     this._fallbackActive = false;
+    this._sttTriedAsFallback = false;
     this._hideVoiceNotice();
     try { this.recognition.start(); } catch (e) {
-      // Pode precisar recriar
       try {
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
         const old = this.recognition;
@@ -1088,7 +1098,7 @@ const SpeechService = {
         r.start();
       } catch(e2) { console.log('[Speech start]', e2.message); this._failCount++; if(this._failCount>=this._maxFails) return this.triggerFallback('Não foi possível iniciar o microfone neste aparelho.'); }
     }
-  },
+  },,
 
   stop() {
     this.stoppedByUser = true;
