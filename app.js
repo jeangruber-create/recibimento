@@ -12,8 +12,8 @@ function showVersionBadge() {
 }
 
 // ============ VERSAO DO SISTEMA ============
-const APP_VERSION = '2026-11-07-v7';
-const APP_BUILD = '8981eeb';
+const APP_VERSION = '2026-11-07-v8';
+const APP_BUILD = 'stt';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
@@ -682,6 +682,13 @@ const SpeechService = {
   _failCount: 0,
   _maxFails: 2,
   _fallbackActive: false,
+  sttEnabled: false,
+  sttChecked: false,
+  _sttTriedAsFallback: false,
+  _mediaRecorder: null,
+  _mediaStream: null,
+  _audioChunks: [],
+  _mediaMode: false,
 
   init() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -824,6 +831,9 @@ const SpeechService = {
     };
   },
 
+  // Checagem STT em background
+  _initSttCheck() { if(!this.sttChecked) this._checkStt(); },
+
   // Timer de silêncio: encerra a captura só depois de uma pausa longa (padrão 20s)
   resetSilenceTimer() {
     this.clearSilenceTimer();
@@ -872,21 +882,129 @@ const SpeechService = {
     if (v) v.style.display = 'none';
     if (m) m.style.display = 'none';
   },
-  triggerFallback(reason) {
-    if (this._fallbackActive) return;
+
+
+  async _checkStt() {
+    try {
+      const r = await fetch('/api/stt/status', { credentials: 'same-origin' });
+      if (r.ok) { const d = await r.json(); this.sttEnabled = !!d.enabled; }
+    } catch(e) {}
+    this.sttChecked = true;
+  },
+
+  async startMediaRecording(opts) {
+    opts = opts || {};
+    if (this.isRecording) return this.stop();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
+      return this._fallbackToManualOnly(opts.reason || 'Gravação de áudio não suportada neste navegador.');
+    }
+    try {
+      this._mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch(e) {
+      return this._fallbackToManualOnly('Permissão do microfone negada ou indisponível.');
+    }
+    this._audioChunks = [];
+    this._mediaMode = true;
+    this.isRecording = true;
+    this.stoppedByUser = false;
+    this.hasProcessed = false;
+    $('btnVoice') && $('btnVoice').classList.add('recording');
+    if ($('voiceText')) $('voiceText').textContent = opts.asFallback ? 'Gravando (modo compatível)... toque para finalizar' : 'Gravando... toque para finalizar';
+    this._hideVoiceNotice();
+    const mime = (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) ? 'audio/webm;codecs=opus'
+      : (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm')) ? 'audio/webm'
+      : (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/mp4')) ? 'audio/mp4' : '';
+    try {
+      this._mediaRecorder = mime ? new MediaRecorder(this._mediaStream, { mimeType: mime }) : new MediaRecorder(this._mediaStream);
+    } catch(e) {
+      try { this._mediaRecorder = new MediaRecorder(this._mediaStream); } catch(e2) { return this._fallbackToManualOnly('Não foi possível iniciar a gravação.'); }
+    }
+    this._mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) this._audioChunks.push(e.data); };
+    this._mediaRecorder.onstop = async () => {
+      const type = (this._mediaRecorder && this._mediaRecorder.mimeType) || 'audio/webm';
+      this._releaseMediaStream();
+      const blob = new Blob(this._audioChunks, { type });
+      this._audioChunks = [];
+      this._mediaMode = false;
+      this.isRecording = false;
+      $('btnVoice') && $('btnVoice').classList.remove('recording');
+      if (this.stoppedByUser && blob.size < 1024) {
+        if ($('voiceText')) $('voiceText').textContent = 'Toque e fale';
+        return;
+      }
+      if ($('voiceText')) $('voiceText').textContent = 'Transcrevendo áudio...';
+      const text = await this._transcribeBlob(blob, type);
+      if (text && text.trim()) {
+        this.processTranscript(text.trim());
+      } else {
+        this._fallbackToManualOnly('Não foi possível transcrever o áudio. Tente falar mais perto do microfone ou use a Entrada Manual.');
+      }
+    };
+    this._mediaRecorder.start(250);
+    // limite de segurança
+    this._mediaMaxTimer = setTimeout(() => { if (this._mediaMode && this.isRecording) this.stopMediaRecording(); }, 120000);
+  },
+
+  stopMediaRecording() {
+    this.stoppedByUser = true;
+    if (this._mediaMaxTimer) { clearTimeout(this._mediaMaxTimer); this._mediaMaxTimer = null; }
+    try { if (this._mediaRecorder && this._mediaRecorder.state !== 'inactive') this._mediaRecorder.stop(); } catch(e) { this._releaseMediaStream(); this._mediaMode=false; this.isRecording=false; }
+  },
+
+  _releaseMediaStream() {
+    try { if (this._mediaStream) this._mediaStream.getTracks().forEach(t=>t.stop()); } catch(e) {}
+    this._mediaStream = null; this._mediaRecorder = null;
+  },
+
+  async _transcribeBlob(blob, mimeType) {
+    try {
+      const b64 = await new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(String(fr.result||''));
+        fr.onerror = reject;
+        fr.readAsDataURL(blob);
+      });
+      const r = await fetch('/api/stt/transcribe', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audio: b64, mimeType: mimeType || blob.type || 'audio/webm' })
+      });
+      const d = await r.json().catch(()=>({}));
+      if (r.ok && d && d.transcript) return d.transcript;
+      if (d && d.fallback === false) return null;
+      return null;
+    } catch(e) { console.log('[STT upload]', e); return null; }
+  },
+
+  _fallbackToManualOnly(reason) {
     this._fallbackActive = true;
     this.stoppedByUser = true;
-    this._clearWatchdog();
-    this.clearSilenceTimer();
-    this.clearMaxTimer();
     this.isRecording = false;
-    try { if (this.recognition) this.recognition.abort(); } catch(e) {}
-    const msg = reason || 'O ditado por voz não está disponível neste navegador/celular.';
+    this._releaseMediaStream();
     $('btnVoice') && $('btnVoice').classList.remove('recording');
-    if ($('voiceText')) $('voiceText').textContent = 'Ditado indisponível — use a entrada manual';
-    this._showVoiceNotice('<strong>Ditado indisponível neste aparelho/navegador.</strong> ' + msg + ' Use a <strong>Entrada Manual</strong> abaixo para lançar o recebimento.');
+    if ($('voiceText')) $('voiceText').textContent = 'Use a Entrada Manual';
+    this._showVoiceNotice('<strong>Não foi possível usar o ditado neste aparelho.</strong> ' + (reason||'') + ' Use a <strong>Entrada Manual</strong> abaixo.');
     this._openManualForm();
     showToast('Use a Entrada Manual para continuar', 'warning');
+  },
+
+  async triggerFallback(reason) {
+    if (this._fallbackActive && this._sttTriedAsFallback) return;
+    if (!this.sttChecked) { try { await this._checkStt(); } catch(e){} }
+    // Se STT (gravação compatível) estiver disponível, tenta antes do manual
+    if (this.sttEnabled && !this._sttTriedAsFallback) {
+      this._sttTriedAsFallback = true;
+      this.stoppedByUser = true;
+      this._clearWatchdog(); this.clearSilenceTimer(); this.clearMaxTimer();
+      this.isRecording = false;
+      try { if (this.recognition) this.recognition.abort(); } catch(e) {}
+      $('btnVoice') && $('btnVoice').classList.remove('recording');
+      if ($('voiceText')) $('voiceText').textContent = 'Iniciando modo compatível...';
+      showToast('Tentando gravação compatível de áudio', 'info');
+      this.startMediaRecording({ asFallback: true, reason: reason });
+      return;
+    }
+    this._fallbackToManualOnly(reason || 'O ditado por voz não está disponível neste navegador/celular.');
   },
 
   _doRestart() {
@@ -943,8 +1061,12 @@ const SpeechService = {
 
   // Interface pública
   start() {
-    if (!this.isSupported) return this.triggerFallback('Navegador sem suporte ao ditado por voz.');
+    if (!this.sttChecked) this._checkStt();
     if (this.isRecording) return this.stop();
+    if (!this.isSupported) {
+      if (this.sttEnabled) return this.startMediaRecording({ reason: 'Navegador sem Web Speech; usando gravação compatível.' });
+      return this.triggerFallback('Navegador sem suporte ao ditado por voz.');
+    }
     this._isRestart = false;
     this.stoppedByUser = false;
     this.hasProcessed = false;
@@ -973,6 +1095,8 @@ const SpeechService = {
     this._clearWatchdog();
     this.clearSilenceTimer();
     this.clearMaxTimer();
+    if (this._mediaMaxTimer) { clearTimeout(this._mediaMaxTimer); this._mediaMaxTimer = null; }
+    if (this._mediaMode) { this.stopMediaRecording(); return; }
     if (this.recognition) try { this.recognition.stop(); } catch(e) {}
   },
 
