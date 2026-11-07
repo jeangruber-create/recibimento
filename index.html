@@ -74,6 +74,13 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
   .app .nav-btn { flex: 0 0 auto; padding: 6px 16px; font-size: 11px; touch-action: manipulation; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
   .nav-btn * { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
   .bottombar { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  /* Navegação rápida (fallback) */
+  .quick-nav { display:none; gap:6px; padding:8px 10px; background: var(--card); border-bottom:1px solid var(--border); overflow-x:auto; -webkit-overflow-scrolling:touch; position:sticky; top:var(--topbar-h); z-index:90; touch-action: manipulation; }
+  .quick-nav .qnav-btn { flex:0 0 auto; border:1px solid var(--border); background:#fff; color:var(--primary); padding:8px 12px; border-radius:999px; font-size:13px; font-weight:600; cursor:pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
+  .quick-nav .qnav-btn.active { background: var(--primary); color:#fff; border-color: var(--primary); }
+  .quick-nav .qnav-danger { color: var(--error); border-color: #f0caca; }
+  #voiceFallbackNotice { display:none; margin:10px 0; padding:10px 12px; border-radius:8px; background:#FFF8E1; border:1px solid #FFE082; color:#6D4C00; font-size:13px; }
+
   .screen {
     align-items: center;
     padding-left: max(24px, calc((100% - var(--container)) / 2));
@@ -259,6 +266,18 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
       <button class="btn btn-ghost" id="btnLogout" style="display:none;">Sair</button>
     </div>
   </header>
+  <!-- Navegação alternativa (fallback mobile - caso o rodapé seja interceptado pelo navegador) -->
+  <nav id="quickNav" class="quick-nav" style="display:none;" aria-label="Navegação rápida">
+    <button type="button" class="qnav-btn" onclick="startCollection()">Receber</button>
+    <button type="button" class="qnav-btn" onclick="navigate('screenEntries')">Lançar</button>
+    <button type="button" class="qnav-btn" id="qnavDashboard" style="display:none;" onclick="navigate('screenDashboard')">Painel</button>
+    <button type="button" class="qnav-btn" id="qnavWeekly" style="display:none;" onclick="navigate('screenWeeklyClose')">Semanal</button>
+    <button type="button" class="qnav-btn" id="qnavAdmin" style="display:none;" onclick="navigate('screenAdmin')">Gerir</button>
+    <button type="button" class="qnav-btn" id="qnavReceipt" style="display:none;" onclick="navigate('screenReceipt')">Recibo</button>
+    <button type="button" class="qnav-btn" onclick="navigate('screenCloseService')">Fechar</button>
+    <button type="button" class="qnav-btn qnav-danger" onclick="logout()">Sair</button>
+  </nav>
+
 
   <!-- SCREEN 1: LOGIN -->
   <section class="screen active" id="screenLogin" data-title="Login">
@@ -1246,9 +1265,9 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
   <div class="toast" id="toast"></div>
 </div>
 
-<script src="app.js?v=6"></script>
+<script src="app.js?v=7"></script>
 
 
-<script src="mbw.js?v=6"></script>
+<script src="mbw.js?v=7"></script>
 </body>
 </html>

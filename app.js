@@ -12,8 +12,8 @@ function showVersionBadge() {
 }
 
 // ============ VERSAO DO SISTEMA ============
-const APP_VERSION = '2026-11-06-v6';
-const APP_BUILD = '2a3a1a2';
+const APP_VERSION = '2026-11-07-v7';
+const APP_BUILD = 'fallback';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
@@ -155,8 +155,13 @@ function updateNav(activeScreen) {
   document.querySelectorAll('.nav-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.screen === activeScreen);
   });
+  document.querySelectorAll('.qnav-btn').forEach(b => {
+    const m = (b.getAttribute('onclick')||'').match(/navigate\('(screen[^']+)'\)/);
+    b.classList.toggle('active', !!(m && m[1] === activeScreen));
+  });
   // Show receipt nav only after first receipt
   $('navReceipt').style.display = serviceReceipts.length > 0 ? 'flex' : 'none';
+  if($('qnavReceipt')) $('qnavReceipt').style.display = serviceReceipts.length > 0 ? 'inline-block' : 'none';
 }
 
 // ============ STORAGE (localStorage) ============
@@ -622,6 +627,7 @@ async function afterLogin(user) {
   if ($('syncBadge')) $('syncBadge').style.display = 'inline-block';
   updateSyncBadge();
   $('bottombar').style.display = user.role === 'membro' ? 'none' : 'flex';
+  if($('quickNav')) $('quickNav').style.display = user.role === 'membro' ? 'none' : 'flex';
   updateAdminNav();
 
   try { await syncFinancialData(); }
@@ -673,13 +679,18 @@ const SpeechService = {
   stoppedByUser: false,
   _isRestart: false,
   _watchdog: null,
+  _failCount: 0,
+  _maxFails: 2,
+  _fallbackActive: false,
 
   init() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) {
       this.isSupported = false;
       $('btnVoice').disabled = true;
-      $('voiceText').textContent = 'Voz não suportada neste navegador';
+      $('voiceText').textContent = 'Voz não suportada — use a Entrada Manual';
+      this._fallbackActive = true;
+      setTimeout(()=>{ try{this._showVoiceNotice('<strong>Ditado por voz não é suportado neste navegador.</strong> Use a <strong>Entrada Manual</strong> para lançar o recebimento.'); this._openManualForm();}catch(e){} }, 0);
       return;
     }
     this.isSupported = true;
@@ -743,11 +754,16 @@ const SpeechService = {
       // Sem mais tentativas
       this.isRecording = false;
       this.clearMaxTimer();
+      if (!this.hasProcessed && !(this.finalText||'').trim() && !(this.interimText||'').trim()) {
+        this._failCount++;
+        if (this._failCount >= this._maxFails) { this.triggerFallback('O ditado encerrou repetidamente neste aparelho.'); return; }
+      }
       this._finalize();
     };
 
     this.recognition.onresult = (e) => {
       this.resetSilenceTimer();
+      this._failCount = 0;
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const transcript = e.results[i][0].transcript;
@@ -791,8 +807,19 @@ const SpeechService = {
 
     this.recognition.onerror = (e) => {
       console.log('[Speech error]', e.error);
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        this.triggerFallback('Permissão do microfone negada ou serviço de voz bloqueado. Verifique as permissões do site no navegador.');
+        return;
+      }
+      if (e.error === 'network' || e.error === 'audio-capture') {
+        this._failCount++;
+        if (this._failCount >= this._maxFails) {
+          this.triggerFallback('Falha de rede/áudio no ditado (' + e.error + ').');
+          return;
+        }
+      }
       if (e.error !== 'no-speech' && e.error !== 'aborted') {
-        showToast('Erro: ' + e.error, 'error');
+        showToast('Ditado: ' + e.error + ' — tentando novamente ou use Entrada Manual', 'warning');
       }
     };
   },
@@ -833,6 +860,35 @@ const SpeechService = {
     }
   },
 
+
+  _showVoiceNotice(msg) {
+    const n = $('voiceFallbackNotice');
+    if (n) { n.style.display = 'block'; if (msg) n.innerHTML = msg; }
+  },
+  _hideVoiceNotice() { const n = $('voiceFallbackNotice'); if (n) n.style.display = 'none'; },
+  _openManualForm() {
+    const c = $('cardManualForm'), v = $('btnVoice'), m = $('btnManualEntry');
+    if (c) c.style.display = 'block';
+    if (v) v.style.display = 'none';
+    if (m) m.style.display = 'none';
+  },
+  triggerFallback(reason) {
+    if (this._fallbackActive) return;
+    this._fallbackActive = true;
+    this.stoppedByUser = true;
+    this._clearWatchdog();
+    this.clearSilenceTimer();
+    this.clearMaxTimer();
+    this.isRecording = false;
+    try { if (this.recognition) this.recognition.abort(); } catch(e) {}
+    const msg = reason || 'O ditado por voz não está disponível neste navegador/celular.';
+    $('btnVoice') && $('btnVoice').classList.remove('recording');
+    if ($('voiceText')) $('voiceText').textContent = 'Ditado indisponível — use a entrada manual';
+    this._showVoiceNotice('<strong>Ditado indisponível neste aparelho/navegador.</strong> ' + msg + ' Use a <strong>Entrada Manual</strong> abaixo para lançar o recebimento.');
+    this._openManualForm();
+    showToast('Use a Entrada Manual para continuar', 'warning');
+  },
+
   _doRestart() {
     if (this.stoppedByUser || this.hasProcessed) return;
     try {
@@ -850,8 +906,10 @@ const SpeechService = {
         r.start();
       } catch (e2) {
         console.log('[Speech restart] falha total', e2.message);
+        this._failCount++;
         this.isRecording = false;
         this.clearMaxTimer();
+        if (this._failCount >= this._maxFails) { this.triggerFallback('Não foi possível manter o ditado ativo neste aparelho.'); return; }
         this._finalize();
       }
     }
@@ -885,7 +943,7 @@ const SpeechService = {
 
   // Interface pública
   start() {
-    if (!this.isSupported) return showToast('Reconhecimento de voz não disponível', 'error');
+    if (!this.isSupported) return this.triggerFallback('Navegador sem suporte ao ditado por voz.');
     if (this.isRecording) return this.stop();
     this._isRestart = false;
     this.stoppedByUser = false;
@@ -893,6 +951,9 @@ const SpeechService = {
     this.finalText = '';
     this.interimText = '';
     this.restartAttempts = 0;
+    this._failCount = 0;
+    this._fallbackActive = false;
+    this._hideVoiceNotice();
     try { this.recognition.start(); } catch (e) {
       // Pode precisar recriar
       try {
@@ -903,7 +964,7 @@ const SpeechService = {
         r.onstart = old.onstart; r.onend = old.onend; r.onresult = old.onresult; r.onerror = old.onerror;
         this.recognition = r;
         r.start();
-      } catch(e2) { console.log('[Speech start]', e2.message); }
+      } catch(e2) { console.log('[Speech start]', e2.message); this._failCount++; if(this._failCount>=this._maxFails) return this.triggerFallback('Não foi possível iniciar o microfone neste aparelho.'); }
     }
   },
 
@@ -1274,6 +1335,7 @@ async function logout() {
   $('btnLogout').style.display = 'none';
   if ($('syncBadge')) $('syncBadge').style.display = 'none';
   $('bottombar').style.display = 'none';
+  if($('quickNav')) $('quickNav').style.display = 'none';
   updateAdminNav();
   navigate('screenLogin');
 }
@@ -2089,6 +2151,9 @@ function updateAdminNav() {
   if (dashNav) dashNav.style.display = canViewDashboard(currentUser) ? 'flex' : 'none';
   const weeklyNav = $('navWeekly');
   if (weeklyNav) weeklyNav.style.display = canViewWeekly(currentUser) ? 'flex' : 'none';
+  const qa = $('qnavAdmin'); if (qa) qa.style.display = canManage(currentUser) ? 'inline-block' : 'none';
+  const qd = $('qnavDashboard'); if (qd) qd.style.display = canViewDashboard(currentUser) ? 'inline-block' : 'none';
+  const qw = $('qnavWeekly'); if (qw) qw.style.display = canViewWeekly(currentUser) ? 'inline-block' : 'none';
 }
 
 // Fechamento semanal: sede, tesoureiro de setor e de congregação
@@ -5615,6 +5680,7 @@ async function init() {
     currentUser = savedUser;
     $('btnLogout').style.display = 'block';
     $('bottombar').style.display = currentUser.role === 'membro' ? 'none' : 'flex';
+    if($('quickNav')) $('quickNav').style.display = currentUser.role === 'membro' ? 'none' : 'flex';
     updateAdminNav();
     if (currentUser.role === 'membro') {
       navigate('screenMember');
