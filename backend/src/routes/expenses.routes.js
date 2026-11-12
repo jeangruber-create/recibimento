@@ -101,6 +101,8 @@ router.post('/', async (req, res, next) => {
           description: data.description ?? null,
           value: data.value,
           payment: data.payment || 'dinheiro',
+          status: 'pending',
+          reviewStatus: 'pending',
           sectorId: scope.sectorId,
           congregationId: scope.congregationId,
           proofName: data.comprovante.name,
@@ -124,6 +126,65 @@ router.post('/', async (req, res, next) => {
       return created;
     });
     res.status(201).json({ expense: serializeExpense(expense, true) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+const reviewSchema = z.object({
+  reviewStatus: z.enum(['pending', 'reviewed', 'approved', 'rejected', 'flagged']).optional(),
+  status: z.enum(['pending', 'approved', 'rejected', 'paid', 'voided']).optional(),
+  action: z.enum(['review', 'approve', 'reject', 'flag', 'pending', 'pay']).optional(),
+  note: z.string().max(500).optional().nullable(),
+});
+
+function resolveExpenseReview(action, reviewStatus, status) {
+  let rs = reviewStatus || null;
+  let st = status || null;
+  if (action === 'approve' || action === 'review') { rs = rs || 'approved'; st = st || 'approved'; }
+  else if (action === 'reject') { rs = rs || 'rejected'; st = st || 'rejected'; }
+  else if (action === 'flag') { rs = rs || 'flagged'; }
+  else if (action === 'pending') { rs = rs || 'pending'; st = st || 'pending'; }
+  else if (action === 'pay') { rs = rs || 'approved'; st = st || 'paid'; }
+  return { reviewStatus: rs, status: st };
+}
+
+// Validação/aprovação administrativa da despesa (Fase 1 controle financeiro).
+router.put('/:id/review', async (req, res, next) => {
+  try {
+    const data = reviewSchema.parse(req.body);
+    const resolved = resolveExpenseReview(data.action, data.reviewStatus, data.status);
+    if (!resolved.reviewStatus && !resolved.status) throw httpError(400, 'Informe action, reviewStatus ou status');
+    const existing = await prisma.expense.findUnique({ where: { id: req.params.id } });
+    if (!existing) throw httpError(404, 'Despesa não encontrada');
+    if (!canWriteExpense(req.user, existing)) throw httpError(403, 'Sem permissão para validar esta despesa');
+
+    const expense = await prisma.$transaction(async (tx) => {
+      const updated = await tx.expense.update({
+        where: { id: existing.id },
+        data: {
+          ...(resolved.reviewStatus ? { reviewStatus: resolved.reviewStatus } : {}),
+          ...(resolved.status ? { status: resolved.status } : {}),
+          reviewedById: req.user.sub,
+          reviewedByName: req.user.name || req.user.email || null,
+          reviewedAt: new Date(),
+          reviewNote: data.note ?? existing.reviewNote ?? null,
+        },
+      });
+      await logAudit(tx, {
+        user: req.user,
+        action: 'expense.review',
+        entity: 'Expense',
+        entityId: existing.id,
+        sectorId: existing.sectorId,
+        congregationId: existing.congregationId,
+        summary: `Validação de ${existing.category}: ${updated.reviewStatus}/${updated.status}`,
+        before: { reviewStatus: existing.reviewStatus, status: existing.status, reviewNote: existing.reviewNote ?? null },
+        after: { reviewStatus: updated.reviewStatus, status: updated.status, reviewNote: updated.reviewNote ?? null },
+      });
+      return updated;
+    });
+    res.json({ expense: serializeExpense(expense, true) });
   } catch (e) {
     next(e);
   }

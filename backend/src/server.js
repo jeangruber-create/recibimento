@@ -20,6 +20,9 @@ const profileRoutes = require('./routes/profile.routes');
 const publicRoutes = require('./routes/public.routes');
 const memberRoutes = require('./routes/members.routes');
 const sttRoutes = require('./routes/stt.routes');
+const financeRoutes = require('./routes/finance.routes');
+const payableRoutes = require('./routes/payables.routes');
+const acertoRoutes = require('./routes/acerto.routes');
 
 const app = express();
 
@@ -98,6 +101,9 @@ app.use('/api/alerts', alertRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/members', memberRoutes);
 app.use('/api/stt', sttRoutes);
+app.use('/api/finance', financeRoutes);
+app.use('/api/payables', payableRoutes);
+app.use('/api/acerto', acertoRoutes);
 
 // Serve arquivo externo para seleção em lote WhatsApp (sempre disponível)
 app.get('/mbwa.js', (req, res) => {

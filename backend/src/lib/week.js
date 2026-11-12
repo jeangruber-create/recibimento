@@ -28,4 +28,17 @@ function resolveWeekStart(input) {
   return startOfWeekMonday(d);
 }
 
-module.exports = { EXPENSE_LIMIT_RATIO, startOfWeekMonday, weekBounds, resolveWeekStart };
+// Número da semana anual no padrão ISO 8601 (segunda a domingo).
+// Ex.: 2026-11-09 -> { week: 46, year: 2026, label: 'Semana 46/2026' }
+function isoWeekInfo(date) {
+  const d = new Date(date);
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((t - yearStart) / 86400000) + 1) / 7);
+  const year = t.getUTCFullYear();
+  return { week, year, label: `Semana ${week}/${year}` };
+}
+
+module.exports = { EXPENSE_LIMIT_RATIO, startOfWeekMonday, weekBounds, resolveWeekStart, isoWeekInfo };

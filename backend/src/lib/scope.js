@@ -59,4 +59,19 @@ function canWriteReceipt(user, receipt) {
   return false;
 }
 
-module.exports = { receiptWhere, resolveReceiptScope, canWriteReceipt, memberSelfReceipt };
+function payableWhere(user, base = {}) {
+  const where = { ...base };
+  if (user.role === 'sede') return where;
+  if (user.role === 'tesoureiro_setor') return { ...where, sectorId: user.sectorId };
+  if (user.role === 'tesoureiro_congregacao') return { ...where, congregationId: user.congregationId };
+  return { ...where, sectorId: -1 };
+}
+
+function canWritePayable(user, p) {
+  if (user.role === 'sede') return true;
+  if (user.role === 'tesoureiro_setor') return p.sectorId === user.sectorId;
+  if (user.role === 'tesoureiro_congregacao') return p.congregationId === user.congregationId;
+  return false;
+}
+
+module.exports = { receiptWhere, resolveReceiptScope, canWriteReceipt, memberSelfReceipt, payableWhere, canWritePayable };

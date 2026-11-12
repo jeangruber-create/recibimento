@@ -12,8 +12,8 @@ function showVersionBadge() {
 }
 
 // ============ VERSAO DO SISTEMA ============
-const APP_VERSION = '2026-11-07-v9';
-const APP_BUILD = 'e292549';
+const APP_VERSION = '2026-11-11-v17';
+const APP_BUILD = 'acerto-sede-selector';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
@@ -159,9 +159,11 @@ function updateNav(activeScreen) {
     const m = (b.getAttribute('onclick')||'').match(/navigate\('(screen[^']+)'\)/);
     b.classList.toggle('active', !!(m && m[1] === activeScreen));
   });
-  // Show receipt nav only after first receipt
-  $('navReceipt').style.display = serviceReceipts.length > 0 ? 'flex' : 'none';
-  if($('qnavReceipt')) $('qnavReceipt').style.display = serviceReceipts.length > 0 ? 'inline-block' : 'none';
+  // Show receipt nav only after first receipt (elementos podem não existir em layouts novos)
+  const navReceipt = $('navReceipt');
+  if (navReceipt) navReceipt.style.display = serviceReceipts.length > 0 ? 'flex' : 'none';
+  const qnavReceipt = $('qnavReceipt');
+  if (qnavReceipt) qnavReceipt.style.display = serviceReceipts.length > 0 ? 'inline-block' : 'none';
 }
 
 // ============ STORAGE (localStorage) ============
@@ -534,6 +536,8 @@ function mapPrestacao(p) {
     reviewedBy: p.reviewedBy || null,
     reviewedAt: p.reviewedAt || null,
     reviewNote: p.reviewNote || '',
+    receivedAt: p.receivedAt || null,
+    receivedNote: p.receivedNote || '',
   };
 }
 
@@ -626,7 +630,8 @@ async function afterLogin(user) {
   $('btnLogout').style.display = 'block';
   if ($('syncBadge')) $('syncBadge').style.display = 'inline-block';
   updateSyncBadge();
-  $('bottombar').style.display = user.role === 'membro' ? 'none' : 'flex';
+  // Rodapé/bottombar removido (atalhos ficavam no menu superior/quickNav)
+  var _bb = $('bottombar'); if (_bb) _bb.style.display = 'none';
   if($('quickNav')) $('quickNav').style.display = user.role === 'membro' ? 'none' : 'flex';
   updateAdminNav();
 
@@ -707,6 +712,7 @@ const SpeechService = {
     this.recognition.interimResults = true;
 
     this.recognition.onstart = () => {
+      this._starting = false;
       this.isRecording = true;
       if (!this._isRestart) {
         // Início novo pelo usuário: limpa tudo
@@ -716,7 +722,7 @@ const SpeechService = {
         this.stoppedByUser = false;
         this.restartAttempts = 0;
         $('btnVoice').classList.add('recording');
-        $('voiceText').textContent = 'Ouvindo... (toque no microfone para finalizar)';
+        $('voiceText').textContent = 'Ouvindo... diga "finalizar" ou toque para encerrar';
         this.resetMaxTimer();
       }
       // Reinício automático: preserva texto acumulado
@@ -726,15 +732,31 @@ const SpeechService = {
     };
 
     this.recognition.onend = () => {
+      this._starting = false;
       this._clearWatchdog();
       this.clearSilenceTimer();
       console.log('[Speech onend] final:', JSON.stringify(this.finalText), '| interim:', JSON.stringify(this.interimText), '| stopped:', this.stoppedByUser);
 
-      // Usuário parou explicitamente: processa
+      // Usuário parou explicitamente: processa (pequeno defer p/ resultado final pendente do Web Speech)
       if (this.stoppedByUser) {
-        this.isRecording = false;
+        // Mantém isRecording/_finalizing até concluir, para evitar que um toque extra limpe o texto capturado
+        this.isRecording = true;
+        this._finalizing = true;
         this.clearMaxTimer();
-        this._finalize();
+        if ($('voiceText')) $('voiceText').textContent = 'Finalizando...';
+        // Incorpora interim ao final para não perder o último trecho
+        if (this.interimText && this.interimText.trim()) {
+          const t = this.interimText.trim();
+          const f = (this.finalText || '').trim();
+          if (t && !f.toLowerCase().endsWith(t.toLowerCase())) {
+            this.finalText = (f ? f + ' ' : '') + t;
+          } else if (t && !f) {
+            this.finalText = t;
+          }
+          this.interimText = '';
+        }
+        if (this._finalizeTimer) { clearTimeout(this._finalizeTimer); this._finalizeTimer = null; }
+        this._finalizeTimer = setTimeout(() => { try { this._finalize(); } catch(e) { console.log('[Speech finalize err]', e); } }, 350);
         return;
       }
 
@@ -794,6 +816,13 @@ const SpeechService = {
             this.corrigir();
             return;
           }
+
+          // Comando de voz: "finalizar" — encerra e transfere o que foi ditado
+          if (this._hasFinalizeCommand(this.finalText)) {
+            console.log('[Speech] Comando "finalizar" detectado (final)');
+            this.finalizarPorComando();
+            return;
+          }
         } else {
           interim += transcript;
 
@@ -801,6 +830,14 @@ const SpeechService = {
           if (/\bcorrigir\b/i.test(interim)) {
             console.log('[Speech] Comando "corrigir" (interim) detectado');
             this.corrigir();
+            return;
+          }
+
+          // Comando "finalizar" no interim: encerra na hora preservando o texto
+          if (this._hasFinalizeCommand(interim)) {
+            console.log('[Speech] Comando "finalizar" detectado (interim)');
+            this.interimText = interim;
+            this.finalizarPorComando();
             return;
           }
         }
@@ -813,6 +850,7 @@ const SpeechService = {
     };
 
     this.recognition.onerror = (e) => {
+      this._starting = false;
       console.log('[Speech error]', e.error);
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
         this.triggerFallback('Permissão do microfone negada ou serviço de voz bloqueado. Verifique as permissões do site no navegador.');
@@ -905,6 +943,7 @@ const SpeechService = {
     }
     this._audioChunks = [];
     this._mediaMode = true;
+    if (this._forceFinalizeTimer) { clearTimeout(this._forceFinalizeTimer); this._forceFinalizeTimer = null; }
     this.isRecording = true;
     this.stoppedByUser = false;
     this.hasProcessed = false;
@@ -929,7 +968,7 @@ const SpeechService = {
       this.isRecording = false;
       $('btnVoice') && $('btnVoice').classList.remove('recording');
       if (this.stoppedByUser && blob.size < 1024) {
-        if ($('voiceText')) $('voiceText').textContent = 'Toque e fale';
+        if ($('voiceText')) $('voiceText').textContent = 'Toque e fale — ao terminar, diga "finalizar"';
         return;
       }
       if ($('voiceText')) $('voiceText').textContent = 'Transcrevendo áudio...';
@@ -1047,16 +1086,26 @@ const SpeechService = {
 
   _finalize() {
     this._clearWatchdog();
+    if (this._finalizeTimer) { clearTimeout(this._finalizeTimer); this._finalizeTimer = null; }
+    if (this._forceFinalizeTimer) { clearTimeout(this._forceFinalizeTimer); this._forceFinalizeTimer = null; }
+    this._finalizing = false;
+    this.isRecording = false;
     if (!this.hasProcessed) {
       const textToProcess = (this.finalText + ' ' + this.interimText).trim();
       console.log('[Speech finalize]', JSON.stringify(textToProcess));
       if (textToProcess) {
         this.hasProcessed = true;
+        window.__lastVoiceTranscript = textToProcess;
         this.processTranscript(textToProcess);
+      } else if (this.stoppedByUser) {
+        // Usuário fechou sem capturar fala — evita "retorno zerado" silencioso
+        $('btnVoice') && $('btnVoice').classList.remove('recording');
+        if ($('voiceText')) $('voiceText').textContent = 'Toque e fale — ao terminar, diga "finalizar"';
+        showToast('Nenhuma fala capturada. Toque no microfone, dite novamente e diga "finalizar" (ou toque para encerrar) — ou use a Entrada Manual.', 'warning');
       }
     }
-    $('btnVoice').classList.remove('recording');
-    $('voiceText').textContent = 'Toque e fale';
+    $('btnVoice') && $('btnVoice').classList.remove('recording');
+    if ($('voiceText')) $('voiceText').textContent = 'Toque e fale — ao terminar, diga "finalizar"';
   },
 
   // Interface pública
@@ -1064,20 +1113,29 @@ const SpeechService = {
     try { return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/i.test(navigator.userAgent)); } catch(e){ return false; }
   },
   async start() {
-    if (this.isRecording) return this.stop();
-    if (!this.sttChecked) { try { await this._checkStt(); } catch(e){} }
-    // Em celular, se STT do servidor estiver habilitado, usa gravação compatível (mais confiável)
-    if (this.sttEnabled && this._isMobile()) {
-      this._sttTriedAsFallback = false;
-      this._fallbackActive = false;
-      this._hideVoiceNotice();
-      return this.startMediaRecording({ reason: 'Modo compatível (celular).' });
+    if (this.isRecording) {
+      // Se já está finalizando (parada do usuário em curso), conclui agora sem perder o texto
+      if (this._finalizing || (this.stoppedByUser && !this.hasProcessed)) {
+        if (this._finalizeTimer) { clearTimeout(this._finalizeTimer); this._finalizeTimer = null; }
+        if (!this.hasProcessed) this._finalize();
+        return;
+      }
+      return this.stop();
     }
+    // Ignora toque duplicado enquanto o microfone ainda está iniciando
+    if (this._starting) return;
+    if (this._finalizeTimer) { clearTimeout(this._finalizeTimer); this._finalizeTimer = null; }
+    this._finalizing = false;
+    // Checa o STT do servidor em background (não bloqueia o ditado; evita duplo toque/atraso no mobile)
+    if (!this.sttChecked) { try { this._checkStt(); } catch(e){} }
+    // Prioriza sempre o ditado nativo (Web Speech), que é o fluxo que transfere os valores.
+    // A gravação + STT do servidor fica apenas como fallback quando o navegador não tem Web Speech.
     if (!this.isSupported) {
       if (this.sttEnabled) return this.startMediaRecording({ reason: 'Navegador sem Web Speech; usando gravação compatível.' });
       return this.triggerFallback('Navegador sem suporte ao ditado por voz.');
     }
     this._isRestart = false;
+    if (this._forceFinalizeTimer) { clearTimeout(this._forceFinalizeTimer); this._forceFinalizeTimer = null; }
     this.stoppedByUser = false;
     this.hasProcessed = false;
     this.finalText = '';
@@ -1087,6 +1145,7 @@ const SpeechService = {
     this._fallbackActive = false;
     this._sttTriedAsFallback = false;
     this._hideVoiceNotice();
+    this._starting = true;
     try { this.recognition.start(); } catch (e) {
       try {
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1096,24 +1155,89 @@ const SpeechService = {
         r.onstart = old.onstart; r.onend = old.onend; r.onresult = old.onresult; r.onerror = old.onerror;
         this.recognition = r;
         r.start();
-      } catch(e2) { console.log('[Speech start]', e2.message); this._failCount++; if(this._failCount>=this._maxFails) return this.triggerFallback('Não foi possível iniciar o microfone neste aparelho.'); }
+      } catch(e2) { this._starting = false; console.log('[Speech start]', e2.message); this._failCount++; if(this._failCount>=this._maxFails) return this.triggerFallback('Não foi possível iniciar o microfone neste aparelho.'); }
     }
-  },,
+  },
 
   stop() {
+    this._starting = false;
+    if (this._finalizeTimer) { clearTimeout(this._finalizeTimer); this._finalizeTimer = null; }
+    this._finalizing = false;
     this.stoppedByUser = true;
     this._clearWatchdog();
     this.clearSilenceTimer();
     this.clearMaxTimer();
     if (this._mediaMaxTimer) { clearTimeout(this._mediaMaxTimer); this._mediaMaxTimer = null; }
     if (this._mediaMode) { this.stopMediaRecording(); return; }
-    if (this.recognition) try { this.recognition.stop(); } catch(e) {}
+    if (this.recognition) {
+      // Segurança: se o navegador não disparar onend, força a transferência do que foi ditado
+      if (this._forceFinalizeTimer) clearTimeout(this._forceFinalizeTimer);
+      this._forceFinalizeTimer = setTimeout(() => {
+        if (!this.hasProcessed) { console.log('[Speech] onend não veio (stop) — forçando finalização'); this._finalize(); }
+      }, 1800);
+      try { this.recognition.stop(); } catch(e) { this._finalize(); }
+    }
+  },
+
+  // Detecta comandos de encerramento do ditado ("finalizar", "encerrar", "concluir"...)
+  _hasFinalizeCommand(text) {
+    return /\b(finalizar|finaliza|finalize|encerrar|encerra|encerre|concluir|conclui)\b/i.test(text || '');
+  },
+
+  // Remove o comando de encerramento do texto transcrito (para não virar nome/valor)
+  _stripFinalizeCommand(text) {
+    return String(text || '')
+      .replace(/\b(finalizar|finaliza|finalize|encerrar|encerra|encerre|concluir|conclui)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  },
+
+  // Comando de voz: "finalizar" — encerra o ditado e transfere os valores para o formulário
+  finalizarPorComando() {
+    if (!this.isRecording && !this._finalizing) return;
+    this.finalText = this._stripFinalizeCommand(this.finalText);
+    this.interimText = this._stripFinalizeCommand(this.interimText);
+    if (this.interimText) {
+      const t = this.interimText.trim();
+      const f = (this.finalText || '').trim();
+      const tl = t.toLowerCase(), fl = f.toLowerCase();
+      if (tl && !fl.endsWith(tl)) {
+        if (!fl) {
+          this.finalText = t;
+        } else if (fl.includes(tl)) {
+          // interim já está contido no final — não duplica
+        } else if (tl.includes(fl)) {
+          // interim é mais completo (acumulativo no mobile)
+          this.finalText = t;
+        } else {
+          this.finalText = f + ' ' + t;
+        }
+      }
+      this.interimText = '';
+    }
+    this._clearWatchdog();
+    this.clearSilenceTimer();
+    this.clearMaxTimer();
+    this.stoppedByUser = true;
+    if ($('btnVoice')) $('btnVoice').classList.remove('recording');
+    if ($('voiceText')) $('voiceText').textContent = 'Finalizando...';
+    showToast('Comando "finalizar" reconhecido — transferindo os valores.', 'success');
+    if (this._mediaMode) { this.stopMediaRecording(); return; }
+    // Segurança: se o navegador não disparar onend, força a transferência
+    if (this._forceFinalizeTimer) clearTimeout(this._forceFinalizeTimer);
+    this._forceFinalizeTimer = setTimeout(() => {
+      if (!this.hasProcessed) { console.log('[Speech] onend não veio — forçando finalização'); this._finalize(); }
+    }, 1500);
+    try { this.recognition.stop(); } catch (e) { this._finalize(); }
   },
 
   // Comando de voz: "corrigir" — zera dados e reinicia gravação
   corrigir() {
     this.clearSilenceTimer();
     this.clearMaxTimer();
+    if (this._finalizeTimer) { clearTimeout(this._finalizeTimer); this._finalizeTimer = null; }
+    if (this._forceFinalizeTimer) { clearTimeout(this._forceFinalizeTimer); this._forceFinalizeTimer = null; }
+    this._finalizing = false;
     this.stoppedByUser = true;
     try { this.recognition.abort(); } catch(e) {}
 
@@ -1133,7 +1257,7 @@ const SpeechService = {
 
     // Feedback visual
     $('btnVoice').classList.remove('recording');
-    $('voiceText').textContent = 'Toque e fale';
+    $('voiceText').textContent = 'Toque e fale — ao terminar, diga "finalizar"';
     showToast('Dados zerados. Fale novamente.', 'success');
 
     // Reinicia gravação automaticamente após 1 segundo
@@ -1147,13 +1271,30 @@ const SpeechService = {
 
   // Processamento do transcript — AQUI entra a IA no V3
   async processTranscript(text) {
-    console.log('[processTranscript] Texto recebido:', JSON.stringify(text));
-    const parsed = this.parseWithRules(text);
-    console.log('[processTranscript] Parsed:', JSON.stringify(parsed));
-    this.applyToForm(parsed);
-    window.voiceParsedData = parsed;
-    navigate('screenVoiceConfirm');
-    renderVoiceConfirm(parsed);
+    try {
+      // Remove o comando "finalizar" (pode vir da transcrição por gravação/STT)
+      const raw = this._stripFinalizeCommand(text);
+      console.log('[processTranscript] Texto recebido:', JSON.stringify(raw));
+      window.__lastVoiceTranscript = raw;
+      if (!raw) {
+        showToast('Nenhuma fala capturada. Dite novamente e diga "finalizar" ao terminar.', 'warning');
+        return;
+      }
+      const parsed = this.parseWithRules(raw) || { name: '', type: '', value: 0, confidence: 0 };
+      parsed.rawText = raw;
+      console.log('[processTranscript] Parsed:', JSON.stringify(parsed));
+      this.applyToForm(parsed);
+      window.voiceParsedData = parsed;
+      window.lastVoiceParsed = parsed;
+      navigate('screenVoiceConfirm');
+      renderVoiceConfirm(parsed);
+      if (!parsed.value && !parsed.name && !parsed.type) {
+        showToast('Texto capturado, mas não foi possível identificar os campos. Confira o texto transcrito e preencha.', 'warning');
+      }
+    } catch (e) {
+      console.log('[processTranscript err]', e);
+      showToast('Não foi possível transferir o ditado. Use a Entrada Manual.', 'error');
+    }
   },
 
   // Parser baseado em regras (substituível por IA)
@@ -1327,7 +1468,9 @@ const SpeechService = {
       .replace(/\bBRL\b/gi, '')
       .replace(/[rR]?\$\s*/g, '')
       .replace(/\b\d+(?:[.,]\d{3})*(?:[.,]\d{2})?\b/g, '')
-      .replace(/\b(dizimo|oferta|missionaria|missoes|construcao|mil|milhao|milhão|reais?|real|outros?|centavos?|centesimos?|BRL|USD|EUR)\b/gi, '')
+      .replace(/\b(dizimo|oferta|missionaria|missoes|construcao|reais?|real|outros?|centavos?|centesimos?|BRL|USD|EUR)\b/gi, '')
+      // Números por extenso e forma de pagamento não fazem parte do nome
+      .replace(/\b(um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|treze|catorze|quatorze|quinze|dezesseis|dezessete|dezoito|dezenove|vinte|trinta|quarenta|cinquenta|sessenta|setenta|oitenta|noventa|cem|cento|duzentos|trezentos|quatrocentos|quinhentos|seiscentos|setecentos|oitocentos|novecentos|mil|milhao|milhoes|bilhao|bilhoes|dinheiro|especie|pix|cartao|credito|debito|transferencia|boleto|cheque|valor|irmao|irma|senhor|senhora)\b/gi, '')
       .replace(/[,\.]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
@@ -1400,6 +1543,23 @@ function renderVoiceConfirm(parsed) {
   const congStr = selectedCongregation ? `${selectedCongregation.code} — ${selectedCongregation.name}` : 'Não selecionada';
   $('vcContext').textContent = `${sectorStr} • ${congStr} • ${dateStr} ${timeStr}`;
 
+  // Texto transcrito (diagnóstico) — ajuda quando o preenchimento vier vazio/zerado
+  const raw = (parsed && (parsed.rawText || parsed.transcript || parsed.text)) ? String(parsed.rawText || parsed.transcript || parsed.text).trim() : '';
+  const rawWrap = $('vcRawWrap');
+  const rawEl = $('vcRawText');
+  const missing = !parsed || !parsed.name || !parsed.type || !parsed.value;
+  if (rawWrap && rawEl) {
+    if (raw) {
+      rawWrap.style.display = 'block';
+      rawEl.textContent = raw;
+      rawWrap.style.borderColor = missing ? 'var(--warning, #f59e0b)' : '#d1d5db';
+      rawWrap.style.background = missing ? '#fffbeb' : '#f8fafc';
+    } else {
+      rawWrap.style.display = 'none';
+      rawEl.textContent = '';
+    }
+  }
+
   // Feedback visual nos campos que vieram vazios
   ['vcName', 'vcType', 'vcValue', 'vcPayment'].forEach(id => {
     const el = $(id);
@@ -1468,7 +1628,7 @@ async function logout() {
   Storage.clearService();
   $('btnLogout').style.display = 'none';
   if ($('syncBadge')) $('syncBadge').style.display = 'none';
-  $('bottombar').style.display = 'none';
+  var _bb = $('bottombar'); if (_bb) _bb.style.display = 'none';
   if($('quickNav')) $('quickNav').style.display = 'none';
   updateAdminNav();
   navigate('screenLogin');
@@ -1767,6 +1927,7 @@ function searchPerson(query) {
 function selectPerson(id) {
   const person = getAllPeople().find(p => String(p.id) === String(id));
   if (!person) return;
+  stopQRScan();
   currentReceipt.person = person;
   $('selectedAvatar').textContent = person.name[0];
   $('selectedName').textContent = person.name;
@@ -1848,7 +2009,42 @@ function refreshMembersInBackground() {
 }
 
 // ============ QR CODE (coletor) ============
+// O leitor de QR (câmera) fica FECHADO por padrão. Só abre quando o usuário
+// toca em "Escanear QR" e sempre pode ser fechado pelo botão "Fechar câmera".
 let qrScanner = null;
+let qrStarting = false;
+
+function setQRCloseButtonVisible(visible) {
+  const closeBtn = $('btnCloseQR');
+  if (closeBtn) closeBtn.style.display = visible ? 'block' : 'none';
+}
+
+function stopQRScan() {
+  const reader = $('qrReader');
+  const scanner = qrScanner;
+  qrScanner = null;
+  qrStarting = false;
+
+  // Esconde imediatamente (a câmera é liberada em seguida)
+  if (reader) reader.style.display = 'none';
+  setQRCloseButtonVisible(false);
+
+  if (!scanner) {
+    if (reader) reader.innerHTML = '';
+    return;
+  }
+  const cleanup = () => {
+    try { if (typeof scanner.clear === 'function') scanner.clear(); } catch (e) {}
+    if (reader) reader.innerHTML = '';
+  };
+  try {
+    const p = scanner.stop();
+    if (p && typeof p.then === 'function') p.then(cleanup).catch(cleanup);
+    else cleanup();
+  } catch (e) {
+    cleanup();
+  }
+}
 
 function findByMemberCode() {
   const code = $('memberCodeInput').value.trim().toUpperCase();
@@ -1863,39 +2059,52 @@ function handleScannedPerson(person) {
   if (selectedCongregation && person.congregationId !== selectedCongregation.id) {
     showToast(`Pessoa pertence a outra congregação`, 'error');
   }
+  stopQRScan();
   selectPerson(person.id);
-  if (qrScanner) { qrScanner.stop().catch(() => {}); qrScanner = null; }
-  $('qrReader').style.display = 'none';
   showToast(`${person.name} identificado(a)!`, 'success');
 }
 
 function startQRScan() {
+  // Já aberto (ou abrindo) → o toque funciona como "fechar"
+  if (qrScanner || qrStarting) { stopQRScan(); return; }
   if (typeof Html5Qrcode === 'undefined') { showToast('Scanner indisponível (precisa HTTPS/localhost)', 'error'); return; }
   const reader = $('qrReader');
+  if (!reader) return;
+  qrStarting = true;
   reader.style.display = 'block';
   reader.innerHTML = '';
-  qrScanner = new Html5Qrcode('qrReader');
-  qrScanner.start(
+  setQRCloseButtonVisible(true);
+  const scanner = new Html5Qrcode('qrReader');
+  qrScanner = scanner;
+  scanner.start(
     { facingMode: 'environment' },
     { fps: 10, qrbox: 220 },
     (decodedText) => {
-      const person = getAllPeople().find(p => (p.memberCode || '').toUpperCase() === decodedText.trim().toUpperCase());
+      const person = getAllPeople().find(p => (p.memberCode || '').toUpperCase() === String(decodedText || '').trim().toUpperCase());
       if (person) {
         handleScannedPerson(person);
       } else {
         showToast('QR não corresponde a um membro', 'error');
-        if (qrScanner) { qrScanner.stop().catch(() => {}); qrScanner = null; }
-        reader.style.display = 'none';
+        stopQRScan();
       }
     },
     () => {}
-  ).catch(() => {
+  ).then(() => {
+    qrStarting = false;
+  }).catch(() => {
+    qrStarting = false;
+    stopQRScan();
     showToast('Não foi possível abrir a câmera', 'error');
-    reader.style.display = 'none';
   });
 }
 
+// Fecha a câmera se a aba/app perder o foco (evita câmera "presa" aberta)
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopQRScan();
+});
+
 function clearPersonSelection() {
+  stopQRScan();
   currentReceipt.person = null;
   $('searchPerson').value = '';
   $('searchResults').innerHTML = '';
@@ -1906,6 +2115,7 @@ function clearPersonSelection() {
 
 $('btnConfirmPerson').onclick = () => {
   if (!currentReceipt.person) return showToast('Selecione uma pessoa', 'error');
+  stopQRScan();
   navigate('screenConfirm');
   renderConfirm();
 };
@@ -2073,6 +2283,8 @@ function startCollection() {
 }
 
 function navigate(screenId) {
+  // A câmera do leitor de QR só pode existir na tela de identificação da pessoa
+  if (screenId !== 'screenPerson') stopQRScan();
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   $(screenId).classList.add('active');
   $('topbarTitle').textContent = $(screenId).dataset.title || 'ADM Recebimentos';
@@ -2097,8 +2309,12 @@ function navigate(screenId) {
   if (screenId === 'screenSectorRegister') renderSectorRegisterScreen();
   if (screenId === 'screenCongregationRegister') renderCongregationRegisterScreen();
   if (screenId === 'screenDashboard') renderDashboard();
-  if (screenId === 'screenWeeklyClose') renderWeeklyClose();
-  if (screenId === 'screenAdminWeeklyReceipts') renderAdminWeeklyReceipts();
+  if (screenId === 'screenWeeklyClose') { weeklyOverview = null; renderWeeklyClose(); }
+  if (screenId === 'screenAdminWeeklyReceipts') adminWeeklyData = null;
+  if (screenId === 'screenAdminWeeklyReceipts' && typeof renderAdminWeeklyReceipts === 'function') renderAdminWeeklyReceipts();
+  if (screenId === 'screenFinanceControl') renderFinanceControl();
+  if (screenId === 'screenConsultas') renderConsultasScreen();
+  if (screenId === 'screenStructure') renderStructureScreen();;
   if (screenId === 'screenMember') renderMemberPortal();
   if (screenId === 'screenMembers') renderMembersScreen();
   if (screenId === 'screenMemberDetail') renderMemberDetailScreen();
@@ -2285,7 +2501,13 @@ function updateAdminNav() {
   if (dashNav) dashNav.style.display = canViewDashboard(currentUser) ? 'flex' : 'none';
   const weeklyNav = $('navWeekly');
   if (weeklyNav) weeklyNav.style.display = canViewWeekly(currentUser) ? 'flex' : 'none';
+  const nf = $('navFinance'); if (nf) nf.style.display = canManage(currentUser) ? 'flex' : 'none';
+  const nc = $('navConsultas'); if (nc) nc.style.display = canManage(currentUser) ? 'flex' : 'none';
+  const ns = $('navStructure'); if (ns) ns.style.display = canManage(currentUser) ? 'flex' : 'none';
   const qa = $('qnavAdmin'); if (qa) qa.style.display = canManage(currentUser) ? 'inline-block' : 'none';
+  const qf = $('qnavFinance'); if (qf) qf.style.display = canManage(currentUser) ? 'inline-block' : 'none';
+  const qc = $('qnavConsultas'); if (qc) qc.style.display = canManage(currentUser) ? 'inline-block' : 'none';
+  const qs = $('qnavStructure'); if (qs) qs.style.display = canManage(currentUser) ? 'inline-block' : 'none';
   const qd = $('qnavDashboard'); if (qd) qd.style.display = canViewDashboard(currentUser) ? 'inline-block' : 'none';
   const qw = $('qnavWeekly'); if (qw) qw.style.display = canViewWeekly(currentUser) ? 'inline-block' : 'none';
 }
@@ -2309,52 +2531,46 @@ function renderAdminScreen() {
   }
 
   const creatable = getCreatableRoles(currentUser.role);
-  $('adminRoleInfo').innerHTML = `<strong>${currentUser.name}</strong> — ${ROLE_LABELS[currentUser.role]}<br>${ROLE_DESC[currentUser.role]}`;
+  const escH = (v)=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  $('adminRoleInfo').innerHTML = `<strong>${escH(currentUser.name)}</strong> — ${escH(ROLE_LABELS[currentUser.role]||currentUser.role)}<br><span style="font-size:13px; color:var(--text-muted);">${escH(ROLE_DESC[currentUser.role]||'')}</span>`;
 
   const menu = $('adminMenu');
   let html = '';
 
-  // Painel de Controle
-  html += `<button class="btn btn-secondary" onclick="navigate('screenDashboard')" style="text-align:left; justify-content:flex-start;">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-    Painel de Controle e Relatórios
+  // --- Setores e Sede (destaque / instâncias) ---
+  html += `<div style="font-size:12px; font-weight:700; color:var(--text-muted); margin:4px 0 6px; text-transform:uppercase; letter-spacing:.04em;">Setores e Sede (organização)</div>`;
+  html += `<button class="btn btn-primary" onclick="navigate('screenStructure')" style="text-align:left; justify-content:flex-start;">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+    Setores e Sede — ver estrutura e onde estou
   </button>`;
-
-  // Fechamento Semanal (segunda a domingo)
-  if (canViewWeekly(currentUser)) {
-    html += `<button class="btn btn-secondary" onclick="navigate('screenWeeklyClose')" style="text-align:left; justify-content:flex-start;">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-      Fechamento Semanal (Seg a Dom)
-    </button>`;
-  }
-
-  // Sede: cadastra setores. Sede e setor: cadastram congregações (setor apenas no seu).
   if (currentUser.role === 'sede') {
-    html += `<button class="btn btn-outline" onclick="navigate('screenSectorRegister')" style="text-align:left; justify-content:flex-start;">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
-      Cadastrar Setores
-    </button>`;
+    html += `<button class="btn btn-outline" onclick="navigate('screenSectorRegister')" style="text-align:left; justify-content:flex-start;">Cadastrar Setores</button>`;
   }
   if (currentUser.role === 'sede' || currentUser.role === 'tesoureiro_setor') {
-    html += `<button class="btn btn-outline" onclick="navigate('screenCongregationRegister')" style="text-align:left; justify-content:flex-start;">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-      Cadastrar Congregações${currentUser.role === 'tesoureiro_setor' ? ' (do meu setor)' : ''}
-    </button>`;
+    html += `<button class="btn btn-outline" onclick="navigate('screenCongregationRegister')" style="text-align:left; justify-content:flex-start;">Cadastrar Congregações${currentUser.role === 'tesoureiro_setor' ? ' (do meu setor)' : ''}</button>`;
   }
 
-  // Cadastro de usuários (conforme o que o perfil pode criar)
-  if (creatable.length > 0) {
-    html += `<button class="btn btn-primary" onclick="navigate('screenUserRegister')" style="text-align:left; justify-content:flex-start;">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
-      Cadastrar Usuários (${creatable.map(r => ROLE_LABELS[r]).join(', ')})
-    </button>`;
-  }
-
-  // Base consolidada de membros/contatos (lista, interações, histórico e Excel)
-  html += `<button class="btn btn-secondary" onclick="navigate('screenMembers')" style="text-align:left; justify-content:flex-start;">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-    Membros & Contatos
+  // --- Consultas e controle ---
+  html += `<div style="font-size:12px; font-weight:700; color:var(--text-muted); margin:12px 0 6px; text-transform:uppercase; letter-spacing:.04em;">Consultas e controle</div>`;
+  html += `<button class="btn btn-secondary" onclick="navigate('screenConsultas')" style="text-align:left; justify-content:flex-start;">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    Consultas de lançamentos (por data, período e situação)
   </button>`;
+  html += `<button class="btn btn-secondary" onclick="navigate('screenDashboard')" style="text-align:left; justify-content:flex-start;">Painel de Controle e Relatórios</button>`;
+  html += `<button class="btn btn-secondary" onclick="navigate('screenFinanceControl')" style="text-align:left; justify-content:flex-start;">Controle Financeiro Geral (Entradas/Saídas/Saldo)</button>`;
+  if (canViewWeekly(currentUser)) {
+    html += `<button class="btn btn-secondary" onclick="navigate('screenWeeklyClose')" style="text-align:left; justify-content:flex-start;">Fechamento Semanal (Seg a Dom)</button>`;
+  }
+  if (currentUser.role === 'sede') {
+    html += `<button class="btn btn-outline" onclick="navigate('screenAdminWeeklyReceipts')" style="text-align:left; justify-content:flex-start;">Recepcionar Fechamentos Semanais</button>`;
+  }
+
+  // --- Pessoas e cadastros ---
+  html += `<div style="font-size:12px; font-weight:700; color:var(--text-muted); margin:12px 0 6px; text-transform:uppercase; letter-spacing:.04em;">Pessoas e cadastros</div>`;
+  if (creatable.length > 0) {
+    html += `<button class="btn btn-outline" onclick="navigate('screenUserRegister')" style="text-align:left; justify-content:flex-start;">Cadastrar Usuários (${creatable.map(r => ROLE_LABELS[r]).join(', ')})</button>`;
+  }
+  html += `<button class="btn btn-outline" onclick="navigate('screenMembers')" style="text-align:left; justify-content:flex-start;">Membros & Contatos</button>`;
 
   menu.innerHTML = html;
 
@@ -3187,6 +3403,27 @@ function startOfWeekMonday(d) {
   return x;
 }
 
+// Número da semana anual no padrão ISO 8601 (segunda a domingo).
+// Ex.: 2026-11-09 -> { week: 46, year: 2026, label: 'Semana 46/2026' }
+function isoWeekInfo(date) {
+  const d = new Date(date);
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((t - yearStart) / 86400000) + 1) / 7);
+  const year = t.getUTCFullYear();
+  return { week, year, label: `Semana ${week}/${year}` };
+}
+
+// Rótulo padrão usado em todo o app: "Semana 46/2026 • 09/11/2026 a 15/11/2026"
+function weekRangeLabel(start, end) {
+  return `${new Date(start).toLocaleDateString('pt-BR')} a ${new Date(end).toLocaleDateString('pt-BR')}`;
+}
+function weekLabelWithNumber(start, end) {
+  return `${isoWeekInfo(start).label} • ${weekRangeLabel(start, end)}`;
+}
+
 function getWeekRange() {
   const base = new Date();
   base.setDate(base.getDate() + weekOffset * 7);
@@ -3222,7 +3459,7 @@ function renderWeeklyCloseRaw() {
   if (!canViewWeekly(currentUser)) { showToast('Acesso restrito', 'error'); return navigate('screenNewReceipt'); }
 
   const { start, end } = getWeekRange();
-  $('weekLabel').textContent = `${start.toLocaleDateString('pt-BR')} a ${end.toLocaleDateString('pt-BR')}`;
+  $('weekLabel').textContent = weekLabelWithNumber(start, end);
 
   const inRange = (d) => { const t = new Date(d).getTime(); return t >= start.getTime() && t <= end.getTime(); };
   const receipts = confirmedOnly(getScopedReceipts()).filter(r => inRange(r.date));
@@ -3255,6 +3492,7 @@ function renderWeeklyCloseRaw() {
   renderWeeklyClosurePanel();
   refreshWeekAlertBanner();
   renderPrestacaoPanel();
+  loadWeeklyOverview();
 }
 
 // Select de congregação do lançamento de despesa, respeitando o escopo
@@ -4714,6 +4952,351 @@ function statusBadge(st) {
   return '<span style="background:#ccc; color:#333; padding:2px 8px; border-radius:10px; font-size:11px;">Aberta</span>';
 }
 
+// ============ VISÃO GERAL POR SEMANA (congregações abertas/fechadas + setor→sede) ============
+// Mostra, para as últimas semanas, quais congregações ainda estão em aberto e
+// quais já fecharam/prestaram contas, nos dois estágios:
+//   congregação -> setor (fechamento/validação)
+//   setor -> sede        (prestação de contas)
+let weeklyOverview = null;
+let weeklyOverviewLoading = false;
+
+function canSeeWeeklyOverview() {
+  const role = currentUser?.role;
+  return role === 'sede' || role === 'tesoureiro_setor' || role === 'tesoureiro_congregacao';
+}
+
+async function loadWeeklyOverview(force) {
+  const card = $('weeklyOverviewCard');
+  if (!card) return;
+  if (!canSeeWeeklyOverview()) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  const list = $('weeklyOverviewList');
+  if (!HAS_FETCH_MODE()) {
+    if (list) list.innerHTML = '<div style="font-size:12px; color:var(--text-muted);">Visão geral disponível quando conectado ao servidor.</div>';
+    return;
+  }
+  if (weeklyOverviewLoading) return;
+  if (!force && weeklyOverview) { renderWeeklyOverview(); return; }
+  weeklyOverviewLoading = true;
+  if (list && !weeklyOverview) list.innerHTML = '<div style="font-size:12px; color:var(--text-muted);">Carregando semanas…</div>';
+  try {
+    const out = await Api.get('/api/closures/overview?weeks=8');
+    weeklyOverview = out;
+    renderWeeklyOverview();
+  } catch (e) {
+    if (list) list.innerHTML = `<div style="font-size:12px; color:var(--error);">Não foi possível carregar a visão geral: ${esc(e.message || 'erro')}</div>`;
+  } finally {
+    weeklyOverviewLoading = false;
+  }
+}
+
+function overviewWeekStatusPill(week) {
+  if (week.isCurrent) return '<span style="background:var(--primary); color:white; padding:1px 8px; border-radius:10px; font-size:10px; margin-left:6px;">atual</span>';
+  return '';
+}
+
+function overviewClosureById(id) {
+  for (const w of (weeklyOverview?.weeks || [])) {
+    for (const s of (w.sectors || [])) {
+      if (s.closure && s.closure.id === id) return s.closure;
+      for (const c of (s.congregations || [])) {
+        if (c.closure && c.closure.id === id) return c.closure;
+      }
+    }
+  }
+  return null;
+}
+
+function overviewCongActions(sec, cong, week) {
+  const role = currentUser?.role;
+  const wk = week.weekStart;
+  const st = cong.status;
+  const btn = (label, color, call) => `<button type="button" class="btn btn-ghost" style="padding:3px 8px; font-size:11px; ${color ? 'color:' + color + ';' : ''}" onclick="${call}">${label}</button>`;
+  const parts = [];
+  if (role === 'tesoureiro_congregacao') {
+    if (st === 'open') parts.push(btn('Fechar', '', `overviewCloseCongregation(${sec.sectorId}, ${cong.id}, '${wk}')`));
+    return parts.join(' ');
+  }
+  if (st === 'open') parts.push(btn('Fechar', '', `overviewCloseCongregation(${sec.sectorId}, ${cong.id}, '${wk}')`));
+  if (st === 'closed' && cong.closure) parts.push(btn('Validar', '', `overviewValidateCongregation('${cong.closure.id}', '${wk}')`));
+  if (st !== 'open' && cong.closure) parts.push(btn('Reabrir', 'var(--error)', `overviewReopenClosure('${cong.closure.id}', '${wk}')`));
+  return parts.join(' ');
+}
+
+function overviewCongRow(sec, cong, week) {
+  const badge = statusBadge(cong.status);
+  const pct = Math.round((cong.ratio || 0) * 100);
+  const money = cong.hasMovement
+    ? `Rec. ${fmtMoney(cong.income)} • Desp. ${fmtMoney(cong.expense)} • ${pct}%`
+    : 'Sem movimentos na semana';
+  return `<div class="list-item" style="align-items:flex-start; padding:8px 0;">
+    <div class="list-item-info">
+      <div class="list-item-title" style="font-size:13px;">${esc(cong.code)} — ${esc(cong.name)}</div>
+      <div class="list-item-sub">${money}${cong.exceeded ? ' • <span style="color:var(--error); font-weight:700;">EXCEDEU 40%</span>' : ''}</div>
+    </div>
+    <div style="text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+      <div>${badge}</div>
+      <div>${overviewCongActions(sec, cong, week)}</div>
+    </div>
+  </div>`;
+}
+
+function overviewSectorBlock(sec, week) {
+  const role = currentUser?.role;
+  const wk = week.weekStart;
+  const p = sec.prestacao;
+  const toSedeBadge = p ? statusBadgePrestacao(p.status) : statusBadgePrestacao('open');
+  const allValidated = sec.totals.congregations > 0 && sec.totals.validated === sec.totals.congregations;
+  const congRows = (sec.congregations || []).map(cong => overviewCongRow(sec, cong, week)).join('')
+    || '<div style="font-size:12px; color:var(--text-muted); padding:6px 0;">Nenhuma congregação no escopo.</div>';
+
+  let prestActions = '';
+  if (role === 'sede' && p) {
+    const b = (label, color, call) => `<button type="button" class="btn btn-ghost" style="padding:4px 10px; font-size:11px; ${color ? 'color:' + color + ';' : ''}" onclick="${call}">${label}</button>`;
+    if (p.status === 'submitted') {
+      prestActions = `${b('Aprovar', '', `overviewApprovePrestacao('${p.id}')`)} ${b('Rejeitar', 'var(--error)', `overviewRejectPrestacao('${p.id}')`)}`;
+    } else if (p.status === 'approved') {
+      prestActions = b('Confirmar recebimento', '', `overviewReceivePrestacao('${p.id}')`);
+    } else if (p.status === 'received' || p.status === 'rejected' || p.status === 'open') {
+      prestActions = b('Reabrir prestação', '', `overviewReopenPrestacao('${p.id}')`);
+    }
+  }
+
+  let sectorActions = '';
+  if (!sec.closure) {
+    const canClose = role === 'sede' || (role === 'tesoureiro_setor' && allValidated);
+    if (canClose) {
+      sectorActions = `<button type="button" class="btn btn-outline" style="padding:4px 10px; font-size:11px;" onclick="overviewCloseSector(${sec.sectorId}, '${wk}')">Fechar semana do setor</button>`;
+    } else if (role === 'tesoureiro_setor') {
+      sectorActions = `<span style="font-size:11px; color:var(--text-muted);">Fechamento do setor aguarda ${sec.totals.congregations - sec.totals.validated} validação(ões)</span>`;
+    }
+  } else if (role === 'sede') {
+    sectorActions = `<button type="button" class="btn btn-ghost" style="padding:4px 10px; font-size:11px; color:var(--error);" onclick="overviewReopenClosure('${sec.closure.id}', '${wk}')">Reabrir semana do setor</button>`;
+  }
+
+  return `<div style="border:1px solid #eee; border-radius:10px; padding:10px; margin-top:8px; background:#fff;">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; flex-wrap:wrap;">
+      <div>
+        <div style="font-weight:700; font-size:13px;">Setor ${esc(sec.sectorCode)} — ${esc(sec.sectorName)}</div>
+        <div style="font-size:11px; color:var(--text-muted);">Congregações: ${sec.totals.open} aberta(s) • ${sec.totals.closed} fechada(s) • ${sec.totals.validated} validada(s)</div>
+      </div>
+      <div style="text-align:right; font-size:11px;">
+        <div>Congregação → setor: ${statusBadge(sec.sectorStatus)}</div>
+        <div style="margin-top:2px;">Setor → sede: ${toSedeBadge}</div>
+      </div>
+    </div>
+    <div style="margin-top:6px;">${congRows}</div>
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; border-top:1px solid #f0f0f0; margin-top:6px; padding-top:8px;">
+      <div style="font-size:11px; color:var(--text-muted);">${sectorActions}</div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap;">${prestActions}</div>
+    </div>
+  </div>`;
+}
+
+function overviewWeekBlock(week) {
+  const t = week.totals || { open: 0, closed: 0, validated: 0, sectors: 0, sectorsReceived: 0 };
+  const sectorsHtml = (week.sectors || []).map(sec => overviewSectorBlock(sec, week)).join('');
+  return `<details ${week.isCurrent ? 'open' : ''} style="border:1px solid var(--border,#e5e7eb); border-radius:10px; padding:10px; margin-bottom:10px; background:#fafafa;">
+    <summary style="cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+      <div>
+        <div style="font-weight:700; color:var(--primary);">${esc(week.label)}${overviewWeekStatusPill(week)}</div>
+        <div style="font-size:11px; color:var(--text-muted);">${weekRangeLabel(week.periodStart, week.periodEnd)}</div>
+      </div>
+      <div style="text-align:right; font-size:11px;">
+        <span style="color:${t.open ? 'var(--gold,#D4A843)' : 'var(--success)'}; font-weight:700;">${t.open} em aberto</span>
+        • ${t.closed} fechada(s) • ${t.validated} validada(s)
+        <div style="color:var(--text-muted);">Setores recebidos pela sede: ${t.sectorsReceived}/${t.sectors}</div>
+      </div>
+    </summary>
+    <div style="margin-top:10px;">${sectorsHtml}</div>
+  </details>`;
+}
+
+function renderWeeklyOverview() {
+  const list = $('weeklyOverviewList');
+  const meta = $('weeklyOverviewMeta');
+  if (!list) return;
+  if (!weeklyOverview || !weeklyOverview.weeks || !weeklyOverview.weeks.length) {
+    list.innerHTML = '<div style="font-size:12px; color:var(--text-muted);">Nenhuma semana para exibir.</div>';
+    if (meta) meta.textContent = '—';
+    return;
+  }
+  if (meta) {
+    meta.textContent = `Últimas ${weeklyOverview.weeks.length} semanas • referência ${weeklyOverview.anchorWeekNumber}/${weeklyOverview.anchorWeekYear}`;
+  }
+  list.innerHTML = weeklyOverview.weeks.map(overviewWeekBlock).join('');
+}
+
+async function refreshAfterOverviewAction() {
+  try { await loadWeeklyOverview(true); } catch (e) { /* mantém o que já está na tela */ }
+  adminWeeklyData = null;
+  const awrScreen = $('screenAdminWeeklyReceipts');
+  if (awrScreen && awrScreen.classList.contains('active')) renderAdminWeeklyReceipts(true);
+  if (canViewWeekly(currentUser)) {
+    try { await refreshWeekClosures(displayedWeekStart()); } catch (e) { /* mantém cache */ }
+    try { await refreshPrestacoes(displayedWeekStart()); } catch (e) { /* mantém cache */ }
+    renderWeeklyCloseRaw();
+  }
+}
+
+async function overviewCloseCongregation(sectorId, congregationId, weekIso) {
+  if (!canManageClosureScope(sectorId) && currentUser?.role !== 'tesoureiro_congregacao') {
+    return showToast('Sem permissão para fechar esta congregação', 'error');
+  }
+  let justification = '';
+  const w = (weeklyOverview?.weeks || []).find(x => x.weekStart === weekIso);
+  const sec = w?.sectors.find(s => s.sectorId === sectorId);
+  const cong = sec?.congregations.find(c => c.id === congregationId);
+  if (cong?.exceeded) {
+    justification = promptJustification('Despesas excederam 40% das receitas. Justifique o excedente:');
+    if (!justification) return showToast('Justificativa obrigatória para fechar o excedente', 'error');
+  }
+  try {
+    await Api.post('/api/closures/close', { scope: 'congregacao', week: weekIso, congregationId, justification });
+    showToast('Semana da congregação fechada', 'success');
+    await refreshAfterOverviewAction();
+  } catch (e) { apiErrorToast(e); }
+}
+
+async function overviewValidateCongregation(closureId, weekIso) {
+  const cl = overviewClosureById(closureId);
+  let justification = cl?.justification || '';
+  if (cl?.exceeded && !justification) {
+    justification = promptJustification('Despesas excederam 40% das receitas. Justifique o excedente autorizado:');
+    if (!justification) return showToast('Justificativa obrigatória para validar o excedente', 'error');
+  }
+  try {
+    await Api.post('/api/closures/' + encodeURIComponent(closureId) + '/validate', { justification });
+    showToast('Fechamento da congregação validado', 'success');
+    await refreshAfterOverviewAction();
+  } catch (e) { apiErrorToast(e); }
+}
+
+async function overviewReopenClosure(closureId, weekIso) {
+  showModal('Reabrir fechamento', 'Reabrir este fechamento? Se for de uma congregação, o fechamento do setor também será reaberto.', async () => {
+    try {
+      await Api.post('/api/closures/' + encodeURIComponent(closureId) + '/reopen');
+      showToast('Fechamento reaberto', 'success');
+      await refreshAfterOverviewAction();
+    } catch (e) { apiErrorToast(e); }
+  });
+}
+
+async function overviewCloseSector(sectorId, weekIso) {
+  if (!canManageClosureScope(sectorId)) return showToast('Sem permissão para fechar este setor', 'error');
+  try {
+    await Api.post('/api/closures/close', { scope: 'setor', week: weekIso, sectorId });
+    showToast('Semana do setor fechada', 'success');
+    await refreshAfterOverviewAction();
+  } catch (e) { apiErrorToast(e); }
+}
+
+async function overviewPrestacaoAction(id, action, note) {
+  try {
+    await Api.post('/api/prestacoes/' + encodeURIComponent(id) + '/' + action, note ? { note } : {});
+    showToast('Prestação atualizada', 'success');
+    await refreshAfterOverviewAction();
+  } catch (e) { apiErrorToast(e); }
+}
+async function overviewApprovePrestacao(id) { return overviewPrestacaoAction(id, 'approve'); }
+async function overviewReceivePrestacao(id) { return overviewPrestacaoAction(id, 'receive'); }
+async function overviewReopenPrestacao(id) {
+  showModal('Reabrir prestação', 'Reabrir a prestação deste setor para ajustes?', async () => {
+    await overviewPrestacaoAction(id, 'reopen');
+  });
+}
+async function overviewRejectPrestacao(id) {
+  const note = promptJustification('Motivo da rejeição / ajuste necessário:');
+  if (!note) return showToast('Informe o motivo da rejeição', 'error');
+  return overviewPrestacaoAction(id, 'reject', note);
+}
+
+// ============ SEDE: RECEPCIONAR FECHAMENTOS SEMANAIS ============
+let adminWeeklyOffset = 0;
+let adminWeeklyData = null;
+let adminWeeklyLoading = false;
+
+function adminWeeklyWeekStart() {
+  const base = new Date();
+  base.setDate(base.getDate() + adminWeeklyOffset * 7);
+  return startOfWeekMonday(base);
+}
+function shiftAdminWeekly(n) { adminWeeklyOffset += n; adminWeeklyData = null; renderAdminWeeklyReceipts(); }
+function goCurrentAdminWeekly() { adminWeeklyOffset = 0; adminWeeklyData = null; renderAdminWeeklyReceipts(); }
+
+async function renderAdminWeeklyReceipts(force) {
+  if (!currentUser || currentUser.role !== 'sede') {
+    showToast('Acesso restrito à sede', 'error');
+    return navigate('screenDashboard');
+  }
+  const week = adminWeeklyWeekStart();
+  const { start, end } = weekBounds(week);
+  const label = $('adminWeeklyLabel');
+  if (label) label.textContent = weekLabelWithNumber(start, end);
+
+  if (!HAS_FETCH_MODE()) {
+    if ($('awrTable')) $('awrTable').innerHTML = '<tr><td colspan="7" style="padding:10px; text-align:center; color:var(--text-muted);">Disponível quando conectado ao servidor.</td></tr>';
+    return;
+  }
+  if (adminWeeklyLoading) return;
+  const wkKey = weekKeyFromAny(week);
+  if (!force && adminWeeklyData && adminWeeklyData.weekKey === wkKey) {
+    renderAdminWeeklyTable();
+    return;
+  }
+  adminWeeklyLoading = true;
+  if ($('awrTable')) $('awrTable').innerHTML = '<tr><td colspan="7" style="padding:10px; text-align:center; color:var(--text-muted);">Carregando…</td></tr>';
+  try {
+    const out = await Api.get('/api/closures/overview?weeks=1&week=' + encodeURIComponent(wkKey));
+    adminWeeklyData = { weekKey: wkKey, week: (out.weeks && out.weeks[0]) || null };
+    renderAdminWeeklyTable();
+  } catch (e) {
+    if ($('awrTable')) $('awrTable').innerHTML = `<tr><td colspan="7" style="padding:10px; text-align:center; color:var(--error);">${esc(e.message || 'Falha ao carregar')}</td></tr>`;
+  } finally {
+    adminWeeklyLoading = false;
+  }
+}
+
+function renderAdminWeeklyTable() {
+  const wk = adminWeeklyData?.week;
+  const tbody = $('awrTable');
+  if (!wk || !tbody) return;
+  const sectors = wk.sectors || [];
+  let submitted = 0, received = 0, pending = 0;
+  const rows = sectors.map(sec => {
+    const p = sec.prestacao;
+    const status = p ? p.status : 'open';
+    if (status === 'submitted') submitted++;
+    if (status === 'received') received++;
+    if (status !== 'received') pending++;
+    const sentAt = p && p.submittedAt ? new Date(p.submittedAt).toLocaleString('pt-BR') : '—';
+    const recvAt = p && p.receivedAt ? new Date(p.receivedAt).toLocaleString('pt-BR')
+      : (p && status === 'received' && p.reviewedAt ? new Date(p.reviewedAt).toLocaleString('pt-BR') : '—');
+    const b = (label, color, call) => `<button type="button" class="btn btn-ghost" style="padding:3px 8px; font-size:11px; ${color ? 'color:' + color + ';' : ''}" onclick="${call}">${label}</button>`;
+    let actions = '<span style="font-size:11px; color:var(--text-muted);">Sem prestação</span>';
+    if (p) {
+      if (status === 'submitted') actions = `${b('Aprovar', '', `overviewApprovePrestacao('${p.id}')`)} ${b('Rejeitar', 'var(--error)', `overviewRejectPrestacao('${p.id}')`)}`;
+      else if (status === 'approved') actions = b('Receber', '', `overviewReceivePrestacao('${p.id}')`);
+      else actions = b('Reabrir', '', `overviewReopenPrestacao('${p.id}')`);
+    }
+    return `<tr>
+      <td style="padding:8px; border:1px solid var(--border);">${esc(sec.sectorCode)} — ${esc(sec.sectorName)}</td>
+      <td style="padding:8px; border:1px solid var(--border); text-align:center;">${statusBadgePrestacao(status)}</td>
+      <td style="padding:8px; border:1px solid var(--border); text-align:right;">${p ? fmtMoney(p.declaredCash) : '—'}</td>
+      <td style="padding:8px; border:1px solid var(--border); text-align:right;">${p ? fmtMoney(p.declaredPix) : '—'}</td>
+      <td style="padding:8px; border:1px solid var(--border); text-align:center;">${sentAt}</td>
+      <td style="padding:8px; border:1px solid var(--border); text-align:center;">${recvAt}</td>
+      <td style="padding:8px; border:1px solid var(--border); text-align:center; white-space:nowrap;">${actions}</td>
+    </tr>`;
+  }).join('');
+  tbody.innerHTML = rows || '<tr><td colspan="7" style="padding:10px; text-align:center; color:var(--text-muted);">Nenhum setor.</td></tr>';
+  if ($('awrTotal')) $('awrTotal').textContent = sectors.length;
+  if ($('awrSubmitted')) $('awrSubmitted').textContent = submitted;
+  if ($('awrClosed')) $('awrClosed').textContent = received;
+  if ($('awrPending')) $('awrPending').textContent = pending;
+  if ($('adminWeeklyMeta')) $('adminWeeklyMeta').textContent = wk.label ? `• ${wk.label}` : '';
+}
+
 function renderWeeklyClosurePanel() {
   const panel = $('weeklyClosurePanel');
   if (!panel) return;
@@ -4764,7 +5347,7 @@ function renderWeeklyClosurePanel() {
             <div class="list-item-sub">Rec. ${fmtMoney(sums.income)} • Desp. ${fmtMoney(sums.expense)} • ${Math.round(sums.ratio * 100)}% ${sums.exceeded ? '• <span style="color:var(--error); font-weight:700;">EXCEDEU 40%</span>' : ''}</div>
             ${cl && cl.justification ? `<div class="list-item-sub" style="color:var(--text-muted);"><strong>Just.:</strong> ${cl.justification}</div>` : ''}
           </div>
-          <div style="text-align:right;">${statusBadge(st)}${cl && st === 'closed' ? `<br><button class="btn btn-primary" style="margin-top:6px; padding:6px 12px; font-size:12px;" onclick="validateCongregationClosure(${sector.id}, ${cong.id})">Validar</button>` : ''}${cl ? `<br><button class="btn btn-ghost" style="margin-top:6px; padding:4px 10px; font-size:11px;" onclick="reopenCongregationClosure(${sector.id}, ${cong.id})">Reabrir</button>` : ''}</div>
+          <div style="text-align:right;">${statusBadge(st)}${!cl ? `<br><button class="btn btn-outline" style="margin-top:6px; padding:4px 10px; font-size:11px;" onclick="closeCongregationFor(${sector.id}, ${cong.id})">Fechar</button>` : ''}${cl && st === 'closed' ? `<br><button class="btn btn-primary" style="margin-top:6px; padding:6px 12px; font-size:12px;" onclick="validateCongregationClosure(${sector.id}, ${cong.id})">Validar</button>` : ''}${cl ? `<br><button class="btn btn-ghost" style="margin-top:6px; padding:4px 10px; font-size:11px;" onclick="reopenCongregationClosure(${sector.id}, ${cong.id})">Reabrir</button>` : ''}</div>
         </div>`;
     });
 
@@ -4858,7 +5441,7 @@ function renderWeeklyClosurePanel() {
             <div class="list-item-title" style="font-size:13px;">${cong.code} — ${cong.name}</div>
             <div class="list-item-sub">Rec. ${fmtMoney(cs.income)} • Desp. ${fmtMoney(cs.expense)} • ${Math.round(cs.ratio * 100)}%${cs.exceeded ? ' • <span style="color:var(--error); font-weight:700;">EXCEDEU 40%</span>' : ''}</div>
           </div>
-          <div style="text-align:right;">${statusBadge(st)}${cl && st === 'closed' ? `<br><button class="btn btn-primary" style="margin-top:6px; padding:6px 12px; font-size:12px;" onclick="validateCongregationClosure(${sec.id}, ${cong.id})">Validar</button>` : ''}${cl ? `<br><button class="btn btn-ghost" style="margin-top:6px; padding:4px 10px; font-size:11px;" onclick="reopenCongregationClosure(${sec.id}, ${cong.id})">Reabrir</button>` : ''}</div>
+          <div style="text-align:right;">${statusBadge(st)}${!cl ? `<br><button class="btn btn-outline" style="margin-top:6px; padding:4px 10px; font-size:11px;" onclick="closeCongregationFor(${sec.id}, ${cong.id})">Fechar</button>` : ''}${cl && st === 'closed' ? `<br><button class="btn btn-primary" style="margin-top:6px; padding:6px 12px; font-size:12px;" onclick="validateCongregationClosure(${sec.id}, ${cong.id})">Validar</button>` : ''}${cl ? `<br><button class="btn btn-ghost" style="margin-top:6px; padding:4px 10px; font-size:11px;" onclick="reopenCongregationClosure(${sec.id}, ${cong.id})">Reabrir</button>` : ''}</div>
         </div>`;
     });
 
@@ -4913,6 +5496,7 @@ function getPrestacao(sectorId, anyDateInWeek) {
 }
 
 function statusBadgePrestacao(st) {
+  if (st === 'received') return '<span style="background:var(--success); color:white; padding:2px 8px; border-radius:10px; font-size:11px;">Recebida pela sede</span>';
   if (st === 'approved') return '<span style="background:var(--success); color:white; padding:2px 8px; border-radius:10px; font-size:11px;">Aprovada</span>';
   if (st === 'submitted') return '<span style="background:var(--gold,#D4A843); color:#1A1A1A; padding:2px 8px; border-radius:10px; font-size:11px;">Enviada (aguardando sede)</span>';
   if (st === 'rejected') return '<span style="background:var(--error); color:white; padding:2px 8px; border-radius:10px; font-size:11px;">Rejeitada / Ajustar</span>';
@@ -5373,7 +5957,7 @@ function renderPendingClosures() {
 
   card.style.display = 'block';
   if (grid) grid.classList.add('has-pending');
-  $('pendingClosuresMeta').textContent = `Semana de ${range} (seg–dom)`;
+  $('pendingClosuresMeta').textContent = `${isoWeekInfo(week).label} • ${range} (seg–dom)`;
   $('pendingClosuresCount').textContent = pending.length ? `(${pending.length})` : '';
 
   if (!pending.length) {
@@ -5404,6 +5988,7 @@ function renderPendingClosures() {
 
 // Abre a tela de fechamento na mesma semana do indicador (semana corrente)
 function openPendingWeekClose() { weekOffset = 0; navigate('screenWeeklyClose'); }
+function openWeeklyOverviewScreen() { weekOffset = 0; navigate('screenWeeklyClose'); }
 
 function refreshWeekAlertBanner() {
   const banner = $('weekAlertBanner');
@@ -5464,6 +6049,39 @@ async function closeCongregationWeek() {
   } else {
     Storage.saveWeekClosure(buildClosure('congregacao', currentUser.sectorId, currentUser.congregationId, sums, just));
     if (sums.exceeded) registerExcessAlert('congregacao', currentUser.sectorId, currentUser.congregationId, week, sums, just);
+  }
+  showToast('Semana da congregação fechada!', 'success');
+  renderWeeklyClose();
+}
+
+// Fecha a semana de uma congregação a partir do painel do setor/sede (semana exibida)
+async function closeCongregationFor(sectorId, congregationId) {
+  if (!canManageClosureScope(sectorId)) return showToast('Sem permissão para fechar esta congregação', 'error');
+  const wk = displayedWeekStart();
+  const existing = getClosureFor('congregacao', sectorId, congregationId, wk);
+  if (existing) return showToast('Esta semana já foi fechada.', 'warning');
+
+  const sums = weekSumsFor(scopeCong(sectorId, congregationId), wk);
+  let justification = ($('weekJustification')?.value || '').trim();
+  if (sums.exceeded && !justification) {
+    justification = promptJustification('Despesas excederam 40% das receitas. Justifique o excedente:');
+    if (!justification) return showToast('Justificativa obrigatória para fechar o excedente', 'error');
+  }
+
+  if (HAS_FETCH_MODE()) {
+    try {
+      const out = await Api.post('/api/closures/close', {
+        scope: 'congregacao',
+        week: weekKeyFromAny(wk),
+        congregationId,
+        justification,
+      });
+      Storage.saveWeekClosure(mapClosure(out.closure));
+      await refreshAlerts().catch(() => {});
+    } catch (e) { return apiErrorToast(e); }
+  } else {
+    Storage.saveWeekClosure(buildClosure('congregacao', sectorId, congregationId, sums, justification));
+    if (sums.exceeded) registerExcessAlert('congregacao', sectorId, congregationId, wk, sums, justification);
   }
   showToast('Semana da congregação fechada!', 'success');
   renderWeeklyClose();
@@ -5813,7 +6431,7 @@ async function init() {
   if (savedUser && ROLE_HIERARCHY[savedUser.role]) {
     currentUser = savedUser;
     $('btnLogout').style.display = 'block';
-    $('bottombar').style.display = currentUser.role === 'membro' ? 'none' : 'flex';
+    var _bb = $('bottombar'); if (_bb) _bb.style.display = 'none';
     if($('quickNav')) $('quickNav').style.display = currentUser.role === 'membro' ? 'none' : 'flex';
     updateAdminNav();
     if (currentUser.role === 'membro') {
@@ -5887,3 +6505,669 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 setInterval(fix,600);
 window.__bottombarFix=fix;
 })();
+
+// ============ CONTROLE FINANCEIRO GERAL (Fases 1-2) ============
+function _finMoney(v){ return (typeof fmt === 'function') ? fmt(v||0) : ('R$ ' + Number(v||0).toFixed(2).replace('.', ',')); }
+function _finQS(){
+  var from = (($('finFrom')||{}).value || '').trim();
+  var to = (($('finTo')||{}).value || '').trim();
+  var qs = [];
+  if (from) qs.push('from=' + encodeURIComponent(from));
+  if (to) qs.push('to=' + encodeURIComponent(to));
+  return qs.length ? ('?' + qs.join('&')) : '';
+}
+function _finPopulatePayableScope(){
+  var ss = $('paySector'), cs = $('payCong');
+  if (!ss || !cs || ss.dataset.ready === '1') return;
+  var sectors = (typeof getManageableSectors === 'function') ? getManageableSectors(currentUser) : (typeof sectorsData !== 'undefined' ? sectorsData : []);
+  ss.innerHTML = sectors.map(function(s){ return '<option value="'+s.id+'">'+esc(s.name)+'</option>'; }).join('') || '<option value="">Selecione setor</option>';
+  function fillCongs(){
+    var sid = Number(ss.value);
+    var sec = sectors.filter(function(s){ return Number(s.id)===sid; })[0];
+    var congs = (sec && sec.congregations) ? sec.congregations : [];
+    cs.innerHTML = congs.map(function(c){ return '<option value="'+c.id+'">'+esc(c.name || c.code || ('#'+c.id))+'</option>'; }).join('') || '<option value="">Selecione congregação</option>';
+  }
+  ss.onchange = fillCongs; fillCongs(); ss.dataset.ready = '1';
+}
+
+async function renderFinanceControl() {
+  if (!canManage(currentUser)) { showToast('Acesso restrito', 'error'); return navigate('screenAdmin'); }
+  _finPopulatePayableScope();
+  var qstr = _finQS();
+  try {
+    var results = await Promise.all([
+      Api.get('/api/finance/overview' + qstr),
+      Api.get('/api/finance/pending' + qstr),
+      Api.get('/api/payables?status=open&limit=200')
+    ]);
+    var ov = results[0] || {};
+    var pend = results[1] || {};
+    var payablesRes = results[2] || {};
+    var r = ov.realized || {};
+    var p = ov.pending || {};
+    var ob = ov.obligations || {};
+    var pr = ov.projected || {};
+    if ($('finIncome')) $('finIncome').textContent = _finMoney(r.income);
+    if ($('finExpense')) $('finExpense').textContent = _finMoney(r.expense);
+    var bal = Number(r.balance || 0);
+    if ($('finBalance')) { $('finBalance').textContent = _finMoney(bal); $('finBalance').style.color = bal < 0 ? 'var(--error)' : ''; }
+    if ($('finObligations')) $('finObligations').textContent = _finMoney(ob.openAmount) + ' (' + (ob.openCount||0) + ')';
+    var pbal = Number(pr.balance != null ? pr.balance : (bal - Number(ob.openAmount||0)));
+    if ($('finProjected')) { $('finProjected').textContent = _finMoney(pbal); $('finProjected').style.color = pbal < 0 ? 'var(--error)' : ''; }
+    if ($('finPending')) $('finPending').textContent = (Number(p.incomeCount||0) + Number(p.expenseCount||0) + Number(ob.pendingApprovalCount||0)) + ' item(ns)';
+    if ($('financeScopeInfo')) $('financeScopeInfo').textContent = 'Perfil: ' + esc((currentUser&&currentUser.name)||'') + ' (' + esc((currentUser&&currentUser.role)||'') + ') · Atualizado: ' + new Date(ov.generatedAt||Date.now()).toLocaleString('pt-BR');
+    if ($('financeBreakdown')) {
+      var ib = r.incomeByPayment || {}; var eb = r.expenseByPayment || {};
+      $('financeBreakdown').innerHTML = 'Entradas pend. confirmação: <strong>' + _finMoney(p.income) + '</strong> (' + (p.incomeCount||0) + ') · Saídas pend. validação: <strong>' + _finMoney(p.expense) + '</strong> (' + (p.expenseCount||0) + ') · Contas vencidas: <strong>' + (ob.overdueCount||0) + '</strong><br>Por forma (realizado) — Entradas: dinheiro ' + _finMoney(ib.dinheiro) + ', pix ' + _finMoney(ib.pix) + ' · Saídas: dinheiro ' + _finMoney(eb.dinheiro) + ', pix ' + _finMoney(eb.pix) + ', outros ' + _finMoney(eb.outros);
+    }
+    renderFinancePendingList((pend && pend.items) || []);
+    renderPayablesList((payablesRes && payablesRes.payables) || []);
+  } catch (e) {
+    console.error('[finance]', e);
+    showToast((e && e.message) ? e.message : 'Falha ao carregar controle financeiro', 'error');
+  }
+}
+
+function renderFinancePendingList(items) {
+  var el = $('financePendingList');
+  if (!el) return;
+  if (!items || !items.length) { el.innerHTML = '<div style="font-size:13px; color:var(--text-muted);">Nenhum item pendente de validação/aprovação no período/filtro.</div>'; return; }
+  el.innerHTML = items.map(function(it){
+    var kindLabel = it.kind === 'expense' ? 'Despesa' : (it.kind === 'payable' ? 'Conta a pagar' : 'Entrada');
+    var proof = (it.kind === 'expense' && it.meta && it.meta.hasProof) ? ' · <span style="color:var(--success);">com comprovante</span>' : '';
+    var date = it.date ? new Date(it.date).toLocaleDateString('pt-BR') : '';
+    var note = it.reviewNote ? '<div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Obs: ' + esc(it.reviewNote) + '</div>' : '';
+    var actions = '';
+    if (it.kind === 'expense') {
+      actions = '<button type="button" class="btn btn-primary" style="padding:6px 10px; font-size:12px;" onclick="reviewFinanceItem(\'expense\',\'' + esc(it.id) + '\',\'approve\')">Aprovar</button> '
+        + '<button type="button" class="btn btn-outline" style="padding:6px 10px; font-size:12px;" onclick="reviewFinanceItem(\'expense\',\'' + esc(it.id) + '\',\'flag\')">Sinalizar</button> '
+        + '<button type="button" class="btn btn-outline" style="padding:6px 10px; font-size:12px; color:var(--error);" onclick="reviewFinanceItem(\'expense\',\'' + esc(it.id) + '\',\'reject\')">Rejeitar</button>';
+    } else if (it.kind === 'payable') {
+      actions = '<button type="button" class="btn btn-primary" style="padding:6px 10px; font-size:12px;" onclick="payableAction(\'' + esc(it.id) + '\',\'approve\')">Aprovar</button> '
+        + '<button type="button" class="btn btn-outline" style="padding:6px 10px; font-size:12px; color:var(--error);" onclick="payableAction(\'' + esc(it.id) + '\',\'cancel\')">Cancelar</button>';
+    } else {
+      actions = '<button type="button" class="btn btn-primary" style="padding:6px 10px; font-size:12px;" onclick="reviewFinanceItem(\'receipt\',\'' + esc(it.id) + '\',\'approve\')">Conferir</button> '
+        + '<button type="button" class="btn btn-outline" style="padding:6px 10px; font-size:12px;" onclick="reviewFinanceItem(\'receipt\',\'' + esc(it.id) + '\',\'flag\')">Sinalizar</button>';
+    }
+    return '<div class="card" style="margin-bottom:8px; padding:12px;"><div><strong>' + esc(kindLabel) + '</strong> · ' + esc(it.label||'') + '<br><span style="font-size:12px; color:var(--text-muted);">' + esc(date) + ' · ' + _finMoney(it.value) + ' · ' + esc(it.payment||'') + ' · status: ' + esc(it.status||'') + proof + '</span>' + note + '</div><div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">' + actions + '</div></div>';
+  }).join('');
+}
+
+function renderPayablesList(items) {
+  var el = $('financePayablesList');
+  if (!el) return;
+  if (!items || !items.length) { el.innerHTML = '<div style="font-size:13px; color:var(--text-muted);">Nenhuma conta a pagar neste filtro.</div>'; return; }
+  var today = new Date(); today.setHours(0,0,0,0);
+  el.innerHTML = items.map(function(p){
+    var due = p.dueDate ? new Date(p.dueDate) : null;
+    var overdue = due && due < today && ['draft','pending_approval','approved','scheduled','partially_paid'].indexOf(p.status) >= 0;
+    var open = Math.max(0, Number(p.amount||0) - Number(p.amountPaid||0));
+    var meta = esc((p.dueDate||'').slice(0,10)) + ' · ' + _finMoney(p.amount) + (Number(p.amountPaid||0)>0 ? (' · pago ' + _finMoney(p.amountPaid)) : '') + ' · ' + esc(p.status||'');
+    if (overdue) meta += ' · <span style="color:var(--error); font-weight:600;">vencida</span>';
+    var actions = '';
+    if (['draft','pending_approval'].indexOf(p.status) >= 0) actions += '<button type="button" class="btn btn-primary" style="padding:6px 10px; font-size:12px;" onclick="payableAction(\''+esc(p.id)+'\',\'approve\')">Aprovar</button> ';
+    if (['approved','scheduled','partially_paid'].indexOf(p.status) >= 0) actions += '<button type="button" class="btn btn-primary" style="padding:6px 10px; font-size:12px;" onclick="payPayable(\''+esc(p.id)+'\','+open+')">Registrar pagamento</button> ';
+    if (['paid','canceled'].indexOf(p.status) < 0) actions += '<button type="button" class="btn btn-outline" style="padding:6px 10px; font-size:12px; color:var(--error);" onclick="payableAction(\''+esc(p.id)+'\',\'cancel\')">Cancelar</button>';
+    return '<div class="card" style="margin-bottom:8px; padding:12px;"><div><strong>'+esc(p.category||'')+'</strong>'+(p.payee?(' · '+esc(p.payee)):'')+'<br><span style="font-size:12px; color:var(--text-muted);">'+meta+'</span>'+(p.description?('<div style="font-size:12px; margin-top:4px;">'+esc(p.description)+'</div>'):'')+'</div><div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">'+actions+'</div></div>';
+  }).join('');
+}
+
+async function renderPayables() {
+  if (!canManage(currentUser)) return;
+  try {
+    var st = (($('payFilterStatus')||{}).value || 'open');
+    var q = st ? ('?status=' + encodeURIComponent(st) + '&limit=200') : '?limit=200';
+    var res = await Api.get('/api/payables' + q);
+    renderPayablesList((res && res.payables) || []);
+  } catch(e){ showToast((e&&e.message)||'Falha ao carregar contas a pagar','error'); }
+}
+
+function togglePayableForm(){
+  var w=$('payableFormWrap'); if(!w) return;
+  var show = w.style.display==='none';
+  w.style.display = show ? 'block' : 'none';
+  if (show) { var ss=$('paySector'); if(ss) ss.dataset.ready=''; _finPopulatePayableScope(); }
+}
+
+async function createPayable(){
+  if (!canManage(currentUser)) return;
+  var category = (($('payCategory')||{}).value||'').trim();
+  var amount = Number((($('payAmount')||{}).value||'').replace(',','.'));
+  var dueDate = (($('payDue')||{}).value||'').trim();
+  var sectorId = Number(($('paySector')||{}).value);
+  var congregationId = Number(($('payCong')||{}).value);
+  if (!category || !(amount>0) || !dueDate || !sectorId || !congregationId) { showToast('Preencha categoria, valor, vencimento, setor e congregação', 'error'); return; }
+  try {
+    await Api.post('/api/payables', {
+      category: category,
+      payee: (($('payPayee')||{}).value||'').trim() || null,
+      amount: amount,
+      dueDate: dueDate,
+      payment: (($('payPayment')||{}).value||'pix'),
+      description: (($('payDesc')||{}).value||'').trim() || null,
+      sectorId: sectorId,
+      congregationId: congregationId,
+      status: 'pending_approval'
+    });
+    showToast('Conta a pagar registrada (aguardando aprovação)', 'success');
+    ['payCategory','payPayee','payAmount','payDue','payDesc'].forEach(function(id){ if($(id)) $(id).value=''; });
+    if ($('payableFormWrap')) $('payableFormWrap').style.display='none';
+    renderFinanceControl();
+  } catch(e){ showToast((e&&e.message)||'Falha ao salvar conta a pagar','error'); }
+}
+
+async function payableAction(id, action){
+  if (!id) return;
+  try {
+    await Api.put('/api/payables/' + encodeURIComponent(id) + '/status', { action: action });
+    showToast('Atualizado', 'success');
+    renderFinanceControl();
+  } catch(e){ showToast((e&&e.message)||'Falha ao atualizar conta','error'); }
+}
+
+function _readProofFile(file){
+  return new Promise(function(resolve, reject){
+    if (!file) return reject(new Error('Selecione o comprovante'));
+    var max = 2 * 1024 * 1024;
+    function done(data){ resolve({ name: file.name, type: file.type || 'application/octet-stream', size: file.size, data: data }); }
+    if (file.type === 'application/pdf') {
+      if (file.size > max) return reject(new Error('Comprovante PDF deve ter no máximo 2MB'));
+      var r = new FileReader();
+      r.onload = function(){ done(r.result); };
+      r.onerror = function(){ reject(new Error('Falha ao ler comprovante')); };
+      r.readAsDataURL(file);
+      return;
+    }
+    if (file.type && file.type.indexOf('image/') === 0) {
+      var r2 = new FileReader();
+      r2.onload = function(){
+        var data = r2.result;
+        if (file.size <= max) return done(data);
+        // compressão simples
+        var img = new Image();
+        img.onload = function(){
+          var maxDim = 1600, w=img.width,h=img.height, scale=Math.min(1,maxDim/Math.max(w,h));
+          var c=document.createElement('canvas'); c.width=Math.round(w*scale); c.height=Math.round(h*scale);
+          c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+          var out=c.toDataURL('image/jpeg',0.78);
+          if (out.length > max * 1.37) return reject(new Error('Imagem do comprovante ficou grande demais (máx. 2MB). Tente outra foto.'));
+          done(out);
+        };
+        img.onerror = function(){ reject(new Error('Falha ao processar imagem do comprovante')); };
+        img.src = data;
+      };
+      r2.onerror = function(){ reject(new Error('Falha ao ler comprovante')); };
+      r2.readAsDataURL(file);
+      return;
+    }
+    // fallback
+    if (file.size > max) return reject(new Error('Comprovante deve ter no máximo 2MB'));
+    var r3 = new FileReader();
+    r3.onload = function(){ done(r3.result); };
+    r3.onerror = function(){ reject(new Error('Falha ao ler comprovante')); };
+    r3.readAsDataURL(file);
+  });
+}
+
+function payPayable(id, remaining){
+  if (!id) return;
+  if ($('payablePayId')) $('payablePayId').value = id;
+  if ($('payablePayAmount')) $('payablePayAmount').value = Number(remaining||0).toFixed(2);
+  if ($('payablePayDate')) $('payablePayDate').value = new Date().toISOString().slice(0,10);
+  if ($('payablePayMethod')) $('payablePayMethod').value = 'pix';
+  if ($('payablePayProof')) $('payablePayProof').value = '';
+  if ($('payablePayProofName')) $('payablePayProofName').textContent = 'Comprovante obrigatório para validar o pagamento.';
+  if ($('payablePayNote')) $('payablePayNote').value = '';
+  if ($('payablePayInfo')) $('payablePayInfo').textContent = 'Saldo em aberto: ' + _finMoney(remaining) + '. Ao confirmar, a saída realizada será gerada automaticamente.';
+  if ($('payablePayModal')) $('payablePayModal').style.display = 'block';
+  var inp = $('payablePayProof');
+  if (inp && !inp.dataset.bound) { inp.dataset.bound='1'; inp.addEventListener('change', function(){ if($('payablePayProofName')) $('payablePayProofName').textContent = (inp.files&&inp.files[0]) ? ('Arquivo: '+inp.files[0].name) : ''; }); }
+}
+
+function closePayablePayModal(){ if ($('payablePayModal')) $('payablePayModal').style.display = 'none'; }
+
+async function submitPayablePayment(){
+  var id = (($('payablePayId')||{}).value||'').trim();
+  var amount = Number((($('payablePayAmount')||{}).value||'').replace(',','.'));
+  var paidAt = (($('payablePayDate')||{}).value||'').trim();
+  var payment = (($('payablePayMethod')||{}).value||'pix');
+  var note = (($('payablePayNote')||{}).value||'').trim();
+  var file = $('payablePayProof') && $('payablePayProof').files ? $('payablePayProof').files[0] : null;
+  if (!id || !(amount>0) || !paidAt) { showToast('Informe valor e data do pagamento', 'error'); return; }
+  if (!file) { showToast('Comprovante é obrigatório para registrar o pagamento', 'error'); return; }
+  try {
+    var comprovante = await _readProofFile(file);
+    await Api.post('/api/payables/' + encodeURIComponent(id) + '/pay', { amount: amount, paidAt: paidAt, payment: payment, note: note || null, comprovante: comprovante });
+    showToast('Pagamento registrado e saída realizada gerada', 'success');
+    closePayablePayModal();
+    renderFinanceControl();
+  } catch (e) {
+    console.error('[payable pay]', e);
+    showToast((e && e.message) ? e.message : 'Falha ao registrar pagamento', 'error');
+  }
+}
+
+async function reviewFinanceItem(kind, id, action) {
+  if (!id) return;
+  var note = '';
+  try {
+    var v = window.prompt('Observação (opcional):');
+    if (v === null) return;
+    note = v || '';
+  } catch(e) { note = ''; }
+  var path = kind === 'expense' ? ('/api/expenses/' + encodeURIComponent(id) + '/review') : ('/api/receipts/' + encodeURIComponent(id) + '/review');
+  try {
+    await Api.put(path, { action: action, note: note || null });
+    showToast('Validação registrada', 'success');
+    renderFinanceControl();
+  } catch (e) {
+    console.error('[finance review]', e);
+    showToast((e && e.message) ? e.message : 'Falha ao validar lançamento', 'error');
+  }
+}
+window.renderFinanceControl = renderFinanceControl;
+window.reviewFinanceItem = reviewFinanceItem;
+window.renderPayables = renderPayables;
+window.togglePayableForm = togglePayableForm;
+window.createPayable = createPayable;
+window.payableAction = payableAction;
+window.payPayable = payPayable;
+window.closePayablePayModal = closePayablePayModal;
+window.submitPayablePayment = submitPayablePayment;
+
+// ============ SETORES E SEDE (Fatia A) + CONSULTAS (Fatia B) ============
+function _scopeLabel(){
+  if (!currentUser) return '—';
+  var role = ROLE_LABELS[currentUser.role] || currentUser.role || '';
+  if (currentUser.role === 'sede') return '<strong>Sede</strong> — visão geral (todos os setores e congregações)';
+  if (currentUser.role === 'tesoureiro_setor') return '<strong>Setor</strong> ' + esc(currentUser.sectorId != null ? ('#'+currentUser.sectorId) : '—') + ' — você vê as congregações do seu setor (' + esc(role) + ')';
+  if (currentUser.role === 'tesoureiro_congregacao') return '<strong>Congregação</strong> ' + esc(currentUser.congregationId != null ? ('#'+currentUser.congregationId) : '—') + ' (setor ' + esc(currentUser.sectorId != null ? ('#'+currentUser.sectorId) : '—') + ') — acesso ao seu local (' + esc(role) + ')';
+  return '<strong>' + esc(role) + '</strong> — acesso conforme seu perfil';
+}
+function _sectorName(id){
+  var list = (typeof sectorsData !== 'undefined' && sectorsData) ? sectorsData : (typeof SECTORS !== 'undefined' ? SECTORS : []);
+  var s = list.filter(function(x){ return String(x.id)===String(id); })[0];
+  return s ? (s.name || ('Setor '+s.id)) : (id!=null ? ('Setor '+id) : '—');
+}
+function _congName(sectorId, congId){
+  var list = (typeof sectorsData !== 'undefined' && sectorsData) ? sectorsData : (typeof SECTORS !== 'undefined' ? SECTORS : []);
+  var s = list.filter(function(x){ return String(x.id)===String(sectorId); })[0];
+  var cs = (s && s.congregations) ? s.congregations : [];
+  var c = cs.filter(function(x){ return String(x.id)===String(congId); })[0];
+  return c ? (c.name || c.code || ('#'+c.id)) : (congId!=null ? ('#'+congId) : '—');
+}
+function _canPickSector(){ return currentUser && (currentUser.role === 'sede' || currentUser.role === 'tesoureiro_setor'); }
+function _canPickCong(){ return currentUser && (currentUser.role === 'sede' || currentUser.role === 'tesoureiro_setor'); }
+
+function renderStructureScreen(){
+  if (!canManage(currentUser)) { showToast('Acesso restrito', 'error'); return navigate('screenAdmin'); }
+  if ($('structureContext')) $('structureContext').innerHTML = 'Você está em: ' + _scopeLabel();
+  var el = $('structureContent'); if (!el) return;
+  var sectors = (typeof getManageableSectors === 'function') ? getManageableSectors(currentUser) : ((typeof sectorsData !== 'undefined' && sectorsData) ? sectorsData : []);
+  var html = '';
+
+  if (currentUser.role === 'sede') {
+    html += '<div class="card" style="margin-bottom:12px; border-left:4px solid var(--primary,#2563eb);">'
+      + '<h3 class="card-title">Sede — visão geral (consolidado)</h3>'
+      + '<p style="font-size:13px; color:var(--text-muted); margin:0 0 10px;">Acompanhe tudo (todos os setores e congregações), valide lançamentos e consulte o consolidado.</p>'
+      + '<div style="display:flex; gap:8px; flex-wrap:wrap;">'
+      + '<button type="button" class="btn btn-primary" onclick="navigate(\'screenConsultas\')">Consultas (consolidado)</button>'
+      + '<button type="button" class="btn btn-secondary" onclick="navigate(\'screenFinanceControl\')">Controle Financeiro</button>'
+      + '<button type="button" class="btn btn-outline" onclick="navigate(\'screenDashboard\')">Painel e Relatórios</button>'
+      + '</div></div>';
+  }
+
+  html += '<div class="card" style="margin-bottom:12px;">'
+    + '<h3 class="card-title">Setores' + (currentUser.role==='sede' ? '' : ' (no seu acesso)') + '</h3>'
+    + '<p style="font-size:13px; color:var(--text-muted); margin:0 0 10px;">Toque em um setor para ver suas congregações e consultar os lançamentos daquele local.</p>';
+  if (!sectors || !sectors.length) {
+    html += '<div style="font-size:13px; color:var(--text-muted);">Nenhum setor disponível no seu acesso.</div>';
+  } else {
+    html += sectors.map(function(sec){
+      var congs = (sec.congregations || []);
+      var congHtml = congs.length ? ('<div style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap;">' + congs.map(function(c){
+        return '<button type="button" class="btn btn-outline" style="padding:6px 10px; font-size:12px;" onclick="openConsultasScope('+Number(sec.id)+','+Number(c.id)+')">' + esc(c.name||c.code||('#'+c.id)) + '</button>';
+      }).join('') + '</div>') : '<div style="font-size:12px; color:var(--text-muted); margin-top:6px;">Sem congregações cadastradas.</div>';
+      return '<div style="padding:12px; border:1px solid var(--border,#e5e7eb); border-radius:10px; margin-bottom:10px;">'
+        + '<div style="display:flex; justify-content:space-between; gap:8px; align-items:center; flex-wrap:wrap;">'
+        + '<div><strong>' + esc(sec.name || ('Setor '+sec.id)) + '</strong><div style="font-size:12px; color:var(--text-muted);">' + congs.length + ' congregação(ões)</div></div>'
+        + '<button type="button" class="btn btn-secondary" style="padding:6px 10px; font-size:12px;" onclick="openConsultasScope('+Number(sec.id)+',null)">Consultar setor</button>'
+        + '</div>' + congHtml + '</div>';
+    }).join('');
+  }
+  html += '</div>';
+
+  html += '<div class="card">'
+    + '<h3 class="card-title">Atalhos rápidos</h3>'
+    + '<div style="display:flex; gap:8px; flex-wrap:wrap;">'
+    + '<button type="button" class="btn btn-outline" onclick="navigate(\'screenConsultas\')">Consultas de lançamentos</button>'
+    + '<button type="button" class="btn btn-outline" onclick="navigate(\'screenFinanceControl\')">Controle Financeiro</button>'
+    + ((currentUser.role==='sede'||currentUser.role==='tesoureiro_setor') ? '<button type="button" class="btn btn-outline" onclick="navigate(\'screenCongregationRegister\')">Cadastrar Congregações</button>' : '')
+    + (currentUser.role==='sede' ? '<button type="button" class="btn btn-outline" onclick="navigate(\'screenSectorRegister\')">Cadastrar Setores</button>' : '')
+    + '<button type="button" class="btn btn-outline" onclick="navigate(\'screenAdmin\')">Gerir (menu)</button>'
+    + '</div></div>';
+  el.innerHTML = html;
+}
+
+function openConsultasScope(sectorId, congId){
+  navigate('screenConsultas');
+  setTimeout(function(){
+    if ($('cqSector') && sectorId!=null) $('cqSector').value = String(sectorId);
+    if (typeof fillConsultasCongs === 'function') fillConsultasCongs();
+    if ($('cqCong') && congId!=null) $('cqCong').value = String(congId);
+    runConsultas();
+  }, 0);
+}
+
+function _cqIso(d){ return d.toISOString().slice(0,10); }
+function applyConsultasPeriod(){
+  var p = (($('cqPeriod')||{}).value)||'month';
+  var now = new Date(); var from = new Date(now); var to = new Date(now);
+  if (p==='today') { /* same */ }
+  else if (p==='week') { var day=(now.getDay()+6)%7; from.setDate(now.getDate()-day); }
+  else if (p==='30') { from.setDate(now.getDate()-29); }
+  else if (p==='month') { from = new Date(now.getFullYear(), now.getMonth(), 1); }
+  else { return; } // custom
+  if ($('cqFrom')) $('cqFrom').value = _cqIso(from);
+  if ($('cqTo')) $('cqTo').value = _cqIso(to);
+}
+function fillConsultasCongs(){
+  var ss=$('cqSector'), cs=$('cqCong'); if(!ss||!cs) return;
+  var sectors = (typeof getManageableSectors === 'function') ? getManageableSectors(currentUser) : ((typeof sectorsData !== 'undefined' && sectorsData) ? sectorsData : []);
+  var sid = ss.value;
+  var sec = sid ? sectors.filter(function(s){ return String(s.id)===String(sid); })[0] : null;
+  var congs = sec ? (sec.congregations||[]) : [];
+  // if no sector selected and user is setor-tesoureiro, show their sector congs? keep "Todas"
+  if (!sec && currentUser && currentUser.role === 'tesoureiro_congregacao') {
+    sec = sectors.filter(function(s){ return String(s.id)===String(currentUser.sectorId); })[0];
+    congs = sec ? (sec.congregations||[]).filter(function(c){ return String(c.id)===String(currentUser.congregationId); }) : [];
+  }
+  cs.innerHTML = '<option value="">Todas (no meu acesso)</option>' + congs.map(function(c){ return '<option value="'+c.id+'">'+esc(c.name||c.code||('#'+c.id))+'</option>'; }).join('');
+}
+function _populateConsultasScope(){
+  var ss=$('cqSector'), cs=$('cqCong'); if(!ss||!cs) return;
+  var sectors = (typeof getManageableSectors === 'function') ? getManageableSectors(currentUser) : ((typeof sectorsData !== 'undefined' && sectorsData) ? sectorsData : []);
+  ss.innerHTML = '<option value="">Todos (no meu acesso)</option>' + sectors.map(function(s){ return '<option value="'+s.id+'">'+esc(s.name||('Setor '+s.id))+'</option>'; }).join('');
+  if (currentUser && currentUser.role === 'tesoureiro_setor' && currentUser.sectorId!=null) ss.value = String(currentUser.sectorId);
+  if (currentUser && currentUser.role === 'tesoureiro_congregacao' && currentUser.sectorId!=null) ss.value = String(currentUser.sectorId);
+  if (!_canPickSector()) ss.disabled = true; else ss.disabled = false;
+  fillConsultasCongs();
+  if (currentUser && currentUser.role === 'tesoureiro_congregacao' && currentUser.congregationId!=null) cs.value = String(currentUser.congregationId);
+  if (!_canPickCong()) cs.disabled = true; else cs.disabled = false;
+}
+function renderConsultasScreen(){
+  if (!canManage(currentUser)) { showToast('Acesso restrito', 'error'); return navigate('screenAdmin'); }
+  _populateConsultasScope();
+  if ($('consultasContext')) $('consultasContext').textContent = 'Consultando em: ' + (currentUser.role==='sede'?'Sede (consolidado — você pode filtrar por setor/congregação)': (ROLE_LABELS[currentUser.role]||'')) + '.';
+  if (!$('cqFrom') || !$('cqFrom').value) applyConsultasPeriod();
+}
+function clearConsultasFilters(){
+  if($('cqKind')) $('cqKind').value='all';
+  if($('cqPeriod')) $('cqPeriod').value='month';
+  applyConsultasPeriod();
+  if($('cqStatus')) $('cqStatus').value='';
+  if($('cqPayment')) $('cqPayment').value='';
+  if($('cqSearch')) $('cqSearch').value='';
+  _populateConsultasScope();
+  if($('consultasSummary')) $('consultasSummary').textContent='Filtros limpos. Toque em Consultar.';
+  if($('consultasTotals')) $('consultasTotals').innerHTML='';
+  if($('consultasResults')) $('consultasResults').innerHTML='';
+}
+
+function _cqStatusMatch(kind, raw, want){
+  if (!want) return true;
+  var st = String((raw && raw.status) || '').toLowerCase();
+  var rev = String((raw && raw.reviewStatus) || '').toLowerCase();
+  var today = new Date(); today.setHours(0,0,0,0);
+  var due = raw && raw.dueDate ? new Date(raw.dueDate) : null;
+  var overdue = due && due < today && ['paid','canceled','cancelled'].indexOf(st) < 0;
+  if (kind==='payable') {
+    if (want==='vencida') return overdue;
+    if (want==='pago') return st==='paid';
+    if (want==='aprovado') return ['approved','scheduled','partially_paid','paid'].indexOf(st)>=0;
+    if (want==='pendente') return ['draft','pending_approval'].indexOf(st)>=0;
+    if (want==='confirmado') return st==='paid';
+    if (want==='cancelado') return st==='canceled' || st==='cancelled';
+  }
+  if (kind==='expense') {
+    if (want==='pago' || want==='confirmado') return st==='paid' || st==='confirmed';
+    if (want==='aprovado') return rev==='approved' || st==='paid';
+    if (want==='pendente') return rev==='pending' || rev==='flagged' || st==='pending';
+    if (want==='cancelado') return st==='cancelled' || st==='canceled' || rev==='rejected';
+  }
+  if (kind==='receipt') {
+    if (want==='confirmado' || want==='aprovado' || want==='pago') return st==='confirmed' || rev==='reviewed' || rev==='approved';
+    if (want==='pendente') return st!=='confirmed' && rev!=='reviewed';
+    if (want==='cancelado') return st==='cancelled' || st==='canceled';
+  }
+  return true;
+}
+
+async function runConsultas(){
+  if (!canManage(currentUser)) return;
+  var kind = (($('cqKind')||{}).value)||'all';
+  var from = (($('cqFrom')||{}).value)||'';
+  var to = (($('cqTo')||{}).value)||'';
+  var sectorId = (($('cqSector')||{}).value)||'';
+  var congId = (($('cqCong')||{}).value)||'';
+  var wantStatus = (($('cqStatus')||{}).value)||'';
+  var wantPay = (($('cqPayment')||{}).value)||'';
+  var search = (($('cqSearch')||{}).value||'').trim().toLower();
+  if (!from || !to) { showToast('Informe a data inicial e final', 'error'); return; }
+
+  if($('consultasSummary')) $('consultasSummary').textContent = 'Consultando...';
+  if($('consultasResults')) $('consultasResults').innerHTML = '';
+  if($('consultasTotals')) $('consultasTotals').innerHTML = '';
+
+  function baseQS(extra){
+    var p=['from='+encodeURIComponent(from),'to='+encodeURIComponent(to),'limit=1000'];
+    if (sectorId && _canPickSector()) p.push('sectorId='+encodeURIComponent(sectorId));
+    if (congId && _canPickCong()) p.push('congregationId='+encodeURIComponent(congId));
+    if (extra) p.push(extra);
+    return '?'+p.join('&');
+  }
+  var tasks=[];
+  if (kind==='all' || kind==='receipt') tasks.push(Api.get('/api/receipts'+baseQS(search ? ('search='+encodeURIComponent(search)) : '')).then(function(r){ return {k:'receipt', data:(r&&r.receipts)||[]}; }).catch(function(e){ return {k:'receipt', data:[], err:e}; }));
+  if (kind==='all' || kind==='expense') tasks.push(Api.get('/api/expenses'+baseQS()).then(function(r){ return {k:'expense', data:(r&&r.expenses)||[]}; }).catch(function(e){ return {k:'expense', data:[], err:e}; }));
+  if (kind==='all' || kind==='payable') tasks.push(Api.get('/api/payables'+baseQS()).then(function(r){ return {k:'payable', data:(r&&r.payables)||[]}; }).catch(function(e){ return {k:'payable', data:[], err:e}; }));
+
+  try {
+    var res = await Promise.all(tasks);
+    var rows=[];
+    res.forEach(function(pack){
+      if (pack.err) console.warn('[consultas]', pack.k, pack.err);
+      (pack.data||[]).forEach(function(it){
+        var row = { kind: pack.k, raw: it };
+        if (pack.k==='receipt') {
+          row.date = it.date; row.value = Number(it.value||0); row.payment = String(it.payment||'');
+          row.label = (it.type||'Entrada') + (it.personName ? (' — '+it.personName) : '');
+          row.status = it.status||''; row.sectorId=it.sectorId; row.congregationId=it.congregationId;
+        } else if (pack.k==='expense') {
+          row.date = it.date; row.value = Number(it.value||0); row.payment = String(it.payment||'');
+          row.label = (it.category||'Despesa') + (it.payee ? (' — '+it.payee) : '') + (it.description ? (': '+it.description) : '');
+          row.status = it.status||''; row.sectorId=it.sectorId; row.congregationId=it.congregationId;
+        } else {
+          row.date = it.dueDate || it.paidAt || it.createdAt; row.value = Number(it.amount||0); row.payment = String(it.payment||'');
+          row.label = (it.category||'Conta a pagar') + (it.payee ? (' — '+it.payee) : '');
+          row.status = it.status||''; row.sectorId=it.sectorId; row.congregationId=it.congregationId; row.open = Math.max(0, Number(it.amount||0)-Number(it.amountPaid||0));
+        }
+        // client-side filters
+        if (wantPay && row.payment && row.payment.toLowerCase() !== wantPay) return;
+        if (search && pack.k!=='receipt') { // receipt already searched server-side
+          var blob = (row.label+' '+(it.description||'')+' '+(it.category||'')+' '+(it.payee||'')).toLowerCase();
+          if (blob.indexOf(search) < 0) return;
+        }
+        if (!_cqStatusMatch(pack.k, it, wantStatus)) return;
+        rows.push(row);
+      });
+    });
+    rows.sort(function(a,b){ return String(b.date||'').localeCompare(String(a.date||'')); });
+
+    var sumIn=0,sumOut=0,sumPayOpen=0,pend=0;
+    rows.forEach(function(r){
+      if (r.kind==='receipt') sumIn += r.value;
+      else if (r.kind==='expense') sumOut += r.value;
+      else sumPayOpen += (r.open!=null ? r.open : 0);
+      var st=String((r.raw&&r.raw.status)||'').toLowerCase(); var rev=String((r.raw&&r.raw.reviewStatus)||'').toLowerCase();
+      if (rev==='pending' || rev==='flagged' || st==='pending_approval' || st==='draft') pend++;
+    });
+    var saldo = sumIn - sumOut;
+    if($('consultasSummary')) $('consultasSummary').innerHTML = '<strong>'+rows.length+'</strong> lançamento(s) encontrado(s) no período ' + esc(from) + ' a ' + esc(to) + (sectorId||congId ? (' · filtro por local aplicado') : (currentUser.role==='sede'?' · Sede (consolidado)':'')) + (pend?(' · <span style="color:var(--warning,#b45309);">'+pend+' em análise/pendente</span>'):'') + '.';
+    if($('consultasTotals')) $('consultasTotals').innerHTML =
+      '<div class="confirm-item" style="min-width:140px;"><div class="confirm-label">Entradas</div><div class="confirm-value">'+_finMoney(sumIn)+'</div></div>'
+      + '<div class="confirm-item" style="min-width:140px;"><div class="confirm-label">Saídas (pagas)</div><div class="confirm-value">'+_finMoney(sumOut)+'</div></div>'
+      + '<div class="confirm-item" style="min-width:140px;"><div class="confirm-label">Saldo do recorte</div><div class="confirm-value" style="color:'+(saldo<0?'var(--error)':'inherit')+'">'+_finMoney(saldo)+'</div></div>'
+      + (sumPayOpen>0 ? '<div class="confirm-item" style="min-width:140px;"><div class="confirm-label">Contas a pagar (aberto)</div><div class="confirm-value">'+_finMoney(sumPayOpen)+'</div></div>' : '');
+
+    if (!rows.length) { if($('consultasResults')) $('consultasResults').innerHTML = '<div style="font-size:13px; color:var(--text-muted);">Nenhum lançamento encontrado com esses filtros.</div>'; return; }
+    var kindLabel = {receipt:'Entrada', expense:'Saída', payable:'Conta a pagar'};
+    $('consultasResults').innerHTML = rows.slice(0,500).map(function(r){
+      var d = r.date ? new Date(r.date).toLocaleDateString('pt-BR') : '';
+      var loc = (r.sectorId!=null||r.congregationId!=null) ? (' · ' + esc(_sectorName(r.sectorId)) + (r.congregationId!=null ? (' / '+esc(_congName(r.sectorId,r.congregationId))) : '')) : '';
+      var st = esc((r.raw&&r.raw.status)||''); var rev = (r.raw&&r.raw.reviewStatus&&r.raw.reviewStatus!=='none') ? (' · revisão: '+esc(r.raw.reviewStatus)) : '';
+      var val = r.kind==='payable' ? (_finMoney(r.value) + (r.open!=null && r.open!==r.value ? (' · aberto '+_finMoney(r.open)) : '')) : _finMoney(r.value);
+      return '<div style="padding:10px 0; border-bottom:1px solid var(--border,#eee);">'
+        + '<div><strong>'+esc(kindLabel[r.kind]||r.kind)+'</strong> · '+esc(r.label)+'</div>'
+        + '<div style="font-size:12px; color:var(--text-muted); margin-top:2px;">'+esc(d)+' · '+val+' · '+esc(r.payment||'—')+' · situação: '+st+rev+loc+'</div>'
+        + '</div>';
+    }).join('') + (rows.length>500 ? '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">Mostrando 500 de '+rows.length+'. Refine o período/filtros para ver mais.</div>' : '');
+  } catch(e) {
+    console.error('[consultas]', e);
+    if($('consultasSummary')) $('consultasSummary').textContent = 'Falha ao consultar.';
+    showToast((e&&e.message)||'Falha ao consultar lançamentos','error');
+  }
+}
+
+window.renderStructureScreen = renderStructureScreen;
+window.renderConsultasScreen = renderConsultasScreen;
+window.runConsultas = runConsultas;
+window.applyConsultasPeriod = applyConsultasPeriod;
+window.clearConsultasFilters = clearConsultasFilters;
+window.fillConsultasCongs = fillConsultasCongs;
+window.openConsultasScope = openConsultasScope;
+
+
+// ============ FATIA 1: ACERTO SEMANAL (quitadas / a quitar / enviadas à sede / provisão sede) ============
+let acertoSedeSectorId = null;
+function acertoSectorOptionsHtml(selected) {
+  const list = (typeof sectorsData !== 'undefined' && Array.isArray(sectorsData)) ? sectorsData : [];
+  return '<option value="">Selecione o setor…</option>' + list.map(s =>
+    `<option value="${s.id}" ${Number(selected) === Number(s.id) ? 'selected' : ''}>${String(s.id).padStart(2, '0')} — ${esc(s.name)}</option>`
+  ).join('');
+}
+function acertoSelectSector(v) {
+  acertoSedeSectorId = v ? Number(v) : null;
+  renderAcertoBlock();
+}
+async function loadAcertoItems(sectorId, weekStart) {
+  const wk = (weekStart && typeof weekStart.toISOString==='function') ? weekStart.toISOString().slice(0,10) : (weekStart || (typeof weekKeyFromAny==='function'?weekKeyFromAny(displayedWeekStart()):''));
+  const sid = sectorId || (currentUser && currentUser.sectorId);
+  if (!sid || !wk) return null;
+  return await Api.get('/api/acerto/items?week=' + encodeURIComponent(wk) + '&sectorId=' + encodeURIComponent(sid));
+}
+function _acertoMoney(v){ return (typeof fmt==='function')?fmt(v||0):('R$ '+Number(v||0).toFixed(2).replace('.',',')); }
+function _acertoDispLabel(d){ return d==='quitada'?'Quitada (já paga)':(d==='enviada_sede'?'Enviada para a sede':'A quitar (falta pagar)'); }
+function _acertoRow(it, isSede){
+  const val = _acertoMoney(it.amount);
+  const paid = Number(it.amountPaid||0);
+  const prov = Number(it.amountProvisioned||0);
+  const rem = Number(it.remaining!=null?it.remaining:(it.disposition==='quitada'?Math.max(0,Number(it.amount||0)-paid):Math.max(0,Number(it.amount||0)-Math.max(paid,prov))));
+  let meta = val + (paid>0?(' · pago '+_acertoMoney(paid)):'') + (prov>0?(' · provisionado '+_acertoMoney(prov)):'') + (it.disposition==='quitada'?(' · <strong>remanescente '+_acertoMoney(rem)+'</strong>'):(rem!==Number(it.amount||0)?(' · falta '+_acertoMoney(rem)):''));
+  if (it.isBasic) meta += ' · <span style="color:#0369a1;">conta básica</span>';
+  if (it.responsible==='sede') meta += ' · responsável: sede';
+  const v = it.sedeValidationStatus||'pending';
+  const vLabel = v==='approved'?'validado (sede)':(v==='rejected'?'rejeitado (sede)':(v==='flagged'?'sinalizado (sede)':(it.status==='paid_by_setor'?'aguardando validação da sede':'aguardando validação')));
+  meta += ' · <span style="color:'+(v==='approved'?'var(--success)':(v==='rejected'?'var(--error)':'var(--warning,#b45309)'))+'">'+vLabel+'</span>';
+  let actions = '';
+  if (it.disposition !== 'enviada_sede' && it.disposition !== 'quitada') {
+    actions += `<button type="button" class="btn btn-outline" style="padding:4px 8px;font-size:12px;" onclick="acertoSetDisposition('${it.id}','quitada')">Marcar quitada</button> `;
+    actions += `<button type="button" class="btn btn-outline" style="padding:4px 8px;font-size:12px;" onclick="acertoSetDisposition('${it.id}','a_quitar')">Marcar a quitar</button> `;
+    if (it.isBasic || true) actions += `<button type="button" class="btn btn-outline" style="padding:4px 8px;font-size:12px;" onclick="acertoSendToSede('${it.id}')">Enviar p/ sede</button> `;
+  }
+  if (it.disposition === 'a_quitar' && !isSede) {
+    actions += `<button type="button" class="btn btn-outline" style="padding:4px 8px;font-size:12px;" onclick="acertoSetProvisioned('${it.id}',${Number(it.amount||0)})">Informar provisionado</button> `;
+  }
+  if (isSede) {
+    actions += `<button type="button" class="btn btn-primary" style="padding:4px 8px;font-size:12px;" onclick="acertoValidate('${it.id}','approved')">Validar</button> `;
+    actions += `<button type="button" class="btn btn-outline" style="padding:4px 8px;font-size:12px;" onclick="acertoValidate('${it.id}','flagged')">Sinalizar</button> `;
+    if (it.disposition==='a_quitar' || it.disposition==='enviada_sede') actions += `<button type="button" class="btn btn-outline" style="padding:4px 8px;font-size:12px;" onclick="acertoSedeFund('${it.id}')">Provisionar/repasse (sede)</button> `;
+    if (it.disposition!=='quitada') actions += `<button type="button" class="btn btn-outline" style="padding:4px 8px;font-size:12px;" onclick="acertoSettleBySede('${it.id}')">Sede paga credor direto</button> `;
+    if (it.disposition==='a_quitar') actions += `<button type="button" class="btn btn-outline" style="padding:4px 8px;font-size:12px;" onclick="acertoReleaseToSector('${it.id}')">Liberar repasse ao setor</button> `;
+  }
+  return `<div style="padding:10px 0; border-bottom:1px solid var(--border,#eee);"><div><strong>${(typeof esc==='function'?esc(it.label):it.label)}</strong></div><div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${meta}</div>${actions?('<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">'+actions+'</div>'):''}</div>`;
+}
+
+async function renderAcertoBlock() {
+  const panel = $('prestacaoPanel'); const card = $('prestacaoCard');
+  if (!panel || !card || card.style.display === 'none') return;
+  const role = currentUser && currentUser.role;
+  if (role !== 'tesoureiro_setor' && role !== 'sede') return;
+  let sectorId = null;
+  if (role === 'tesoureiro_setor') sectorId = currentUser.sectorId;
+  else if (role === 'sede') sectorId = acertoSedeSectorId;
+  let host = $('acertoBlockHost');
+  if (!host) { host = document.createElement('div'); host.id='acertoBlockHost'; host.style.marginTop='14px'; panel.appendChild(host); }
+  if (!sectorId) {
+    if (role === 'sede') {
+      host.innerHTML = `<div class="card" style="padding:12px;">
+        <h3 class="card-title" style="margin:0 0 6px;">Acerto do setor (sede)</h3>
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">Selecione o setor para ver e validar o acerto da semana exibida: contas quitadas, a quitar, enviadas à sede e provisão/repasse. Pagamentos executados pelo setor aparecem aqui e aguardam validação da sede.</div>
+        <select class="form-input" id="acertoSectorSelect" onchange="acertoSelectSector(this.value)">${acertoSectorOptionsHtml(null)}</select>
+      </div>`;
+    } else {
+      host.innerHTML = '';
+    }
+    return;
+  }
+  host.innerHTML = '<div class="card" style="padding:12px;"><div style="font-size:13px;color:var(--text-muted);">Carregando acerto...</div></div>';
+  try {
+    const week = (typeof displayedWeekStart==='function') ? displayedWeekStart() : new Date();
+    const data = await loadAcertoItems(sectorId, week);
+    if (!data) { host.innerHTML = ''; return; }
+    const items = data.items || [];
+    const sum = data.summary || {};
+    const quitadas = items.filter(x=>x.disposition==='quitada');
+    const aQuitar = items.filter(x=>x.disposition==='a_quitar');
+    const enviadas = items.filter(x=>x.disposition==='enviada_sede');
+    const isSede = role === 'sede';
+    const head = `<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;"><h3 class="card-title" style="margin:0;">Acerto do setor (Fatia 1) — contas quitadas / a quitar</h3><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">${isSede ? `<select class="form-input" style="width:auto;max-width:240px;padding:6px 8px;font-size:12px;" onchange="acertoSelectSector(this.value)">${acertoSectorOptionsHtml(sectorId)}</select>` : ''}<button type="button" class="btn btn-outline" style="padding:6px 10px;font-size:12px;" onclick="acertoSync(${sectorId})">Atualizar/pré-registrar contas</button></div></div>
+      <div style="font-size:12px;color:var(--text-muted);margin:6px 0 10px;">Tudo previamente registrado no acerto. Pagamentos executados pelo setor constam aqui e ficam <strong>pendentes de validação da sede (admin)</strong>. Contas básicas sem recurso podem ser enviadas à sede.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        <div class="confirm-item" style="min-width:150px;"><div class="confirm-label">Quitadas (pago)</div><div class="confirm-value">${_acertoMoney(sum.quitadasPaid)}</div></div>
+        <div class="confirm-item" style="min-width:150px;"><div class="confirm-label">Remanescente a prestar contas</div><div class="confirm-value">${_acertoMoney(sum.quitadasRemaining)}</div></div>
+        <div class="confirm-item" style="min-width:150px;"><div class="confirm-label">A quitar (valor)</div><div class="confirm-value">${_acertoMoney(sum.aQuitarAmount)}</div></div>
+        <div class="confirm-item" style="min-width:150px;"><div class="confirm-label">Provisionado p/ quitação</div><div class="confirm-value">${_acertoMoney(sum.aQuitarProvisioned)}</div></div>
+        <div class="confirm-item" style="min-width:150px;"><div class="confirm-label">Enviadas à sede</div><div class="confirm-value">${_acertoMoney(sum.enviadaSede)}</div></div>
+      </div>`;
+    const sec = (title, arr, hint) => `<div style="margin-top:10px;"><h4 style="margin:0 0 4px;font-size:14px;">${title}</h4>${hint?('<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">'+hint+'</div>'):''}${arr.length?arr.map(it=>_acertoRow(it,isSede)).join(''):'<div style="font-size:13px;color:var(--text-muted);">Nenhuma conta neste grupo.</div>'}</div>`;
+    host.innerHTML = '<div class="card" style="padding:12px;">' + head
+      + sec('Contas quitadas (prestar contas do remanescente)', quitadas, 'Já pagas. No acerto, preste contas do valor remanescente.')
+      + sec('Contas a quitar (provisionar valor para quitação)', aQuitar, 'Falta pagar: informe o valor provisionado. Se o setor não tiver, a sede pode provisionar/repasse futuramente.')
+      + sec('Enviadas para pagamento na sede', enviadas, 'Contas (ex.: energia, água, internet) encaminhadas para a sede pagar.')
+      + '</div>';
+  } catch(e) {
+    console.warn('[acerto]', e);
+    host.innerHTML = '<div class="card" style="padding:12px;"><strong>Acerto (Fatia 1)</strong><div style="font-size:13px;color:var(--error);margin-top:6px;">Não foi possível carregar o acerto. '+((e&&e.message)?e.message:'')+' (reinicie o backend após <code>npx prisma generate</code> para ativar os novos endpoints).</div></div>';
+  }
+}
+async function acertoSync(sectorId){ try{ const wk=(typeof displayedWeekStart==='function')?displayedWeekStart():new Date(); await Api.post('/api/acerto/items/sync?week='+encodeURIComponent(wk.toISOString().slice(0,10))+'&sectorId='+encodeURIComponent(sectorId|| (currentUser&&currentUser.sectorId)),{}); if(typeof showToast==='function') showToast('Acerto atualizado','success'); renderAcertoBlock(); }catch(e){ if(typeof showToast==='function') showToast((e&&e.message)||'Falha ao atualizar acerto','error'); } }
+async function acertoSetDisposition(id, disp){ try{ const body={disposition:disp}; if(disp==='quitada'){ const v=prompt('Valor pago (R$) — deixe em branco para manter:',''); if(v===null) return; if(v!=='') body.amountPaid=Number(String(v).replace(',','.')); } await Api.put('/api/acerto/items/'+encodeURIComponent(id), body); renderAcertoBlock(); }catch(e){ if(typeof showToast==='function') showToast((e&&e.message)||'Falha','error'); } }
+async function acertoSetProvisioned(id, amount){ try{ const v=prompt('Valor provisionado para quitação (R$):', String(amount||'')); if(v===null) return; const n=Number(String(v).replace(',','.')); if(!(n>=0)) return; await Api.put('/api/acerto/items/'+encodeURIComponent(id), { amountProvisioned:n }); renderAcertoBlock(); }catch(e){ if(typeof showToast==='function') showToast((e&&e.message)||'Falha','error'); } }
+async function acertoSendToSede(id){ try{ if(!confirm('Enviar esta conta para pagamento na sede?')) return; await Api.post('/api/acerto/items/'+encodeURIComponent(id)+'/send-to-sede',{ note:'Enviada pelo setor (sem recurso ou conta básica)' }); if(typeof showToast==='function') showToast('Conta enviada para a sede','success'); renderAcertoBlock(); }catch(e){ if(typeof showToast==='function') showToast((e&&e.message)||'Falha','error'); } }
+async function acertoSedeFund(id){ try{ const v=prompt('Valor da provisão/repasse da sede ao setor (R$):',''); if(v===null) return; const n=Number(String(v).replace(',','.')); if(!(n>0)) { alert('Informe um valor válido'); return; } await Api.post('/api/acerto/items/'+encodeURIComponent(id)+'/sede-funding',{ amount:n, note:'Provisão pela sede (repasse futuro ao setor)' }); if(typeof showToast==='function') showToast('Provisão registrada','success'); renderAcertoBlock(); }catch(e){ if(typeof showToast==='function') showToast((e&&e.message)||'Falha','error'); } }
+async function acertoValidate(id, status){ try{ await Api.put('/api/acerto/items/'+encodeURIComponent(id)+'/validate',{ status }); if(typeof showToast==='function') showToast('Validação registrada','success'); renderAcertoBlock(); }catch(e){ if(typeof showToast==='function') showToast((e&&e.message)||'Falha','error'); } }
+
+try {
+  if (typeof renderPrestacaoPanel === 'function') {
+    const _origRPP = renderPrestacaoPanel;
+    renderPrestacaoPanel = function(){ const r = _origRPP.apply(this, arguments); try{ renderAcertoBlock(); }catch(e){ console.warn(e); } return r; };
+  }
+} catch(e) {}
+
+async function acertoSettleBySede(id){ try{ if(!confirm('Registrar que a SEDE pagou direto ao credor? (conta quitada/validada pela sede)')) return; await Api.post('/api/acerto/items/'+encodeURIComponent(id)+'/settle-by-sede',{ note:'Pago diretamente pela sede ao credor' }); if(typeof showToast==='function') showToast('Pagamento direto pela sede registrado','success'); renderAcertoBlock(); }catch(e){ if(typeof showToast==='function') showToast((e&&e.message)||'Falha','error'); } }
+async function acertoReleaseToSector(id){ try{ if(!confirm('Liberar repasse da sede ao setor para esta conta? (o setor quitará o credor com o recurso repassado)')) return; await Api.post('/api/acerto/items/'+encodeURIComponent(id)+'/release-to-sector',{ note:'Repasse da sede liberado ao setor' }); if(typeof showToast==='function') showToast('Repasse liberado ao setor','success'); renderAcertoBlock(); }catch(e){ if(typeof showToast==='function') showToast((e&&e.message)||'Falha','error'); } }
+
+window.renderAcertoBlock = renderAcertoBlock; window.acertoSettleBySede = acertoSettleBySede; window.acertoReleaseToSector = acertoReleaseToSector;
+window.acertoSync = acertoSync; window.acertoSetDisposition = acertoSetDisposition; window.acertoSetProvisioned = acertoSetProvisioned;
+window.acertoSelectSector = acertoSelectSector;
+window.acertoSendToSede = acertoSendToSede; window.acertoSedeFund = acertoSedeFund; window.acertoValidate = acertoValidate;

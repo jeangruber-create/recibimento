@@ -3,8 +3,8 @@ const { z } = require('zod');
 const prisma = require('../prisma');
 const { authRequired } = require('../middleware/auth');
 const { httpError } = require('../middleware/error');
-const { closure: serializeClosure } = require('../lib/serialize');
-const { resolveWeekStart, weekBounds, EXPENSE_LIMIT_RATIO } = require('../lib/week');
+const { closure: serializeClosure, prestacao: serializePrestacao } = require('../lib/serialize');
+const { resolveWeekStart, weekBounds, isoWeekInfo, EXPENSE_LIMIT_RATIO } = require('../lib/week');
 const { weekSums, CONFIRMED_RECEIPT } = require('../lib/weekly');
 const { logAudit } = require('../lib/audit');
 
@@ -63,7 +63,14 @@ router.get('/', async (req, res, next) => {
     else if (req.user.role === 'tesoureiro_congregacao') where.congregationId = req.user.congregationId;
     else if (req.user.role !== 'sede') throw httpError(403, 'Sem acesso aos fechamentos');
     const closures = await prisma.weekClosure.findMany({ where });
-    res.json({ week: weekStart.toISOString(), closures: closures.map(serializeClosure) });
+    const info = isoWeekInfo(weekStart);
+    res.json({
+      week: weekStart.toISOString(),
+      weekNumber: info.week,
+      weekYear: info.year,
+      weekLabel: info.label,
+      closures: closures.map(serializeClosure),
+    });
   } catch (e) {
     next(e);
   }
@@ -136,7 +143,166 @@ router.get('/summary', async (req, res, next) => {
       };
     });
 
-    res.json({ week: weekStart.toISOString(), sectors: summary });
+    const info = isoWeekInfo(weekStart);
+    res.json({
+      week: weekStart.toISOString(),
+      weekNumber: info.week,
+      weekYear: info.year,
+      weekLabel: info.label,
+      sectors: summary,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Visão geral por semana (número da semana anual + períodos):
+// - congregações em aberto / fechadas / validadas (estágio congregação -> setor)
+// - prestação e fechamento do setor (estágio setor -> sede)
+router.get('/overview', async (req, res, next) => {
+  try {
+    const role = req.user.role;
+    if (role !== 'sede' && role !== 'tesoureiro_setor' && role !== 'tesoureiro_congregacao') {
+      throw httpError(403, 'Sem acesso à visão geral de fechamentos');
+    }
+    const weeksCount = Math.min(Math.max(Number(req.query.weeks) || 8, 1), 26);
+    const anchor = resolveWeekStart(req.query.week);
+    const weekStarts = [];
+    for (let i = 0; i < weeksCount; i++) {
+      weekStarts.push(resolveWeekStart(new Date(anchor.getTime() - i * 7 * 86400000)));
+    }
+    const firstWeek = weekStarts[weekStarts.length - 1];
+    const { end: lastEnd } = weekBounds(anchor);
+    const nowWeekStart = resolveWeekStart(new Date());
+
+    const sectorWhere = role === 'sede' ? {} : { id: req.user.sectorId };
+    const sectorsRaw = await prisma.sector.findMany({
+      where: sectorWhere,
+      orderBy: { id: 'asc' },
+      include: { congregations: { orderBy: { code: 'asc' } } },
+    });
+    // Tesoureiro de congregação vê apenas a própria congregação.
+    const sectors = sectorsRaw.map((s) => (
+      role === 'tesoureiro_congregacao'
+        ? { ...s, congregations: s.congregations.filter((c) => c.id === req.user.congregationId) }
+        : s
+    ));
+    const sectorIds = sectors.map((s) => s.id);
+    const congFilter = role === 'tesoureiro_congregacao' ? { congregationId: req.user.congregationId } : {};
+
+    const [closures, prestacoes, receipts, expenses] = await Promise.all([
+      prisma.weekClosure.findMany({ where: { sectorId: { in: sectorIds }, weekStart: { gte: firstWeek } } }),
+      prisma.prestacao.findMany({ where: { sectorId: { in: sectorIds }, weekStart: { gte: firstWeek } } }),
+      prisma.receipt.findMany({
+        where: { sectorId: { in: sectorIds }, ...congFilter, ...CONFIRMED_RECEIPT, date: { gte: firstWeek, lte: lastEnd } },
+        select: { sectorId: true, congregationId: true, value: true, date: true },
+      }),
+      prisma.expense.findMany({
+        where: { sectorId: { in: sectorIds }, ...congFilter, date: { gte: firstWeek, lte: lastEnd } },
+        select: { sectorId: true, congregationId: true, value: true, date: true },
+      }),
+    ]);
+
+    const weekKeyOf = (d) => resolveWeekStart(d).getTime();
+    const incomeBy = new Map();
+    const expenseBy = new Map();
+    receipts.forEach((r) => {
+      const k = `${weekKeyOf(r.date)}|${r.sectorId}|${r.congregationId ?? ''}`;
+      incomeBy.set(k, (incomeBy.get(k) || 0) + Number(r.value));
+    });
+    expenses.forEach((e) => {
+      const k = `${weekKeyOf(e.date)}|${e.sectorId}|${e.congregationId ?? ''}`;
+      expenseBy.set(k, (expenseBy.get(k) || 0) + Number(e.value));
+    });
+
+    const closureMap = new Map(closures.map((c) => [
+      `${c.weekStart.getTime()}|${c.scope}|${c.sectorId}|${c.congregationId ?? ''}`, c,
+    ]));
+    const prestacaoMap = new Map(prestacoes.map((p) => [`${p.weekStart.getTime()}|${p.sectorId}`, p]));
+
+    const weeks = weekStarts.map((weekStart) => {
+      const info = isoWeekInfo(weekStart);
+      const { start, end } = weekBounds(weekStart);
+      const wkTime = weekStart.getTime();
+
+      const sectorRows = sectors.map((sector) => {
+        const sectorClosure = closureMap.get(`${wkTime}|setor|${sector.id}|`) || null;
+        const prestacao = prestacaoMap.get(`${wkTime}|${sector.id}`) || null;
+
+        const congregations = sector.congregations.map((cong) => {
+          const cl = closureMap.get(`${wkTime}|congregacao|${sector.id}|${cong.id}`) || null;
+          const k = `${wkTime}|${sector.id}|${cong.id}`;
+          const income = incomeBy.get(k) || 0;
+          const expense = expenseBy.get(k) || 0;
+          const ratio = income > 0 ? expense / income : (expense > 0 ? 1 : 0);
+          return {
+            id: cong.id,
+            code: cong.code,
+            name: cong.name,
+            status: cl ? cl.status : 'open',
+            income,
+            expense,
+            balance: income - expense,
+            ratio,
+            exceeded: income > 0 && expense > income * EXPENSE_LIMIT_RATIO,
+            hasMovement: income > 0 || expense > 0,
+            closure: cl ? serializeClosure(cl) : null,
+          };
+        });
+
+        const open = congregations.filter((c) => c.status === 'open').length;
+        const closed = congregations.filter((c) => c.status === 'closed').length;
+        const validated = congregations.filter((c) => c.status === 'validated').length;
+
+        return {
+          sectorId: sector.id,
+          sectorName: sector.name,
+          sectorCode: String(sector.id).padStart(2, '0'),
+          closure: sectorClosure ? serializeClosure(sectorClosure) : null,
+          sectorStatus: sectorClosure ? sectorClosure.status : 'open',
+          prestacao: prestacao ? serializePrestacao(prestacao) : null,
+          toSede: {
+            prestacaoStatus: prestacao ? prestacao.status : 'open',
+            sentAt: prestacao && prestacao.submittedAt ? prestacao.submittedAt.toISOString() : null,
+            receivedAt: prestacao && prestacao.receivedAt ? prestacao.receivedAt.toISOString() : null,
+            received: !!(prestacao && prestacao.status === 'received'),
+          },
+          congregations,
+          totals: { congregations: congregations.length, open, closed, validated, pending: open + closed },
+        };
+      });
+
+      const totals = sectorRows.reduce((acc, s) => {
+        acc.congregations += s.totals.congregations;
+        acc.open += s.totals.open;
+        acc.closed += s.totals.closed;
+        acc.validated += s.totals.validated;
+        acc.pending += s.totals.pending;
+        acc.sectors += 1;
+        if (s.toSede.received) acc.sectorsReceived += 1;
+        return acc;
+      }, { congregations: 0, open: 0, closed: 0, validated: 0, pending: 0, sectors: 0, sectorsReceived: 0 });
+
+      return {
+        weekStart: weekStart.toISOString(),
+        weekNumber: info.week,
+        weekYear: info.year,
+        label: info.label,
+        periodStart: start.toISOString(),
+        periodEnd: end.toISOString(),
+        isCurrent: wkTime === nowWeekStart.getTime(),
+        sectors: sectorRows,
+        totals,
+      };
+    });
+
+    const anchorInfo = isoWeekInfo(anchor);
+    res.json({
+      anchorWeek: anchor.toISOString(),
+      anchorWeekNumber: anchorInfo.week,
+      anchorWeekYear: anchorInfo.year,
+      weeks,
+    });
   } catch (e) {
     next(e);
   }
@@ -201,7 +367,7 @@ router.post('/close', async (req, res, next) => {
 
     const closuresForWeek = await prisma.weekClosure.findMany({ where: { weekStart, scope: 'congregacao', sectorId: sector.id } });
     const validated = new Set(closuresForWeek.filter((c) => c.status === 'validated').map((c) => c.congregationId));
-    if (validated.size < sector.congregations.length) {
+    if (validated.size < sector.congregations.length && req.user.role !== 'sede') {
       throw httpError(400, 'Todas as congregações precisam estar validadas antes de fechar o setor');
     }
 
@@ -287,6 +453,10 @@ router.post('/:id/reopen', async (req, res, next) => {
     const closure = await prisma.weekClosure.findUnique({ where: { id: req.params.id } });
     if (!closure) throw httpError(404, 'Fechamento não encontrado');
     if (!canManageClosure(req.user, closure.sectorId, closure.congregationId)) throw httpError(403, 'Sem permissão para reabrir este fechamento');
+    // Tesoureiro de setor pode reabrir movimentos/fechamentos SOMENTE das suas congregações (não do setor).
+    if (req.user.role === 'tesoureiro_setor' && closure.scope === 'setor') {
+      throw httpError(403, 'Tesoureiro de setor só pode reabrir fechamentos de congregações (não do setor)');
+    }
 
     await prisma.$transaction(async (tx) => {
       await tx.weekClosure.delete({ where: { id: closure.id } });

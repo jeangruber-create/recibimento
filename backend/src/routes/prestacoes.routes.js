@@ -179,7 +179,7 @@ router.post('/:id/approve', async (req, res, next) => {
     const body = z.object({ note: z.string().optional() }).parse(req.body || {});
     const prestacao = await prisma.prestacao.findUnique({ where: { id: req.params.id } });
     if (!prestacao) throw httpError(404, 'Prestação não encontrada');
-    if (prestacao.status !== 'submitted') throw httpError(400, 'Prestação não está aguardando aprovação');
+    if (prestacao.status !== 'submitted' && req.user.role !== 'sede') throw httpError(400, 'Prestação não está aguardando aprovação');
     const updated = await prisma.$transaction(async (tx) => {
       const u = await tx.prestacao.update({
         where: { id: prestacao.id },
@@ -209,7 +209,7 @@ router.post('/:id/reject', async (req, res, next) => {
     const body = z.object({ note: z.string().min(1) }).parse(req.body || {});
     const prestacao = await prisma.prestacao.findUnique({ where: { id: req.params.id } });
     if (!prestacao) throw httpError(404, 'Prestação não encontrada');
-    if (prestacao.status !== 'submitted') throw httpError(400, 'Prestação não está aguardando análise');
+    if (prestacao.status !== 'submitted' && req.user.role !== 'sede') throw httpError(400, 'Prestação não está aguardando análise');
     const updated = await prisma.$transaction(async (tx) => {
       const u = await tx.prestacao.update({
         where: { id: prestacao.id },
@@ -224,6 +224,118 @@ router.post('/:id/reject', async (req, res, next) => {
         summary: body.note,
         before: { status: prestacao.status },
         after: { status: 'rejected' },
+      });
+      return u;
+    });
+    res.json({ prestacao: serializePrestacao(updated) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Perfil admin (sede) tem privilégios de receber, reabrir e alterar prestações.
+router.post('/:id/receive', async (req, res, next) => {
+  try {
+    if (req.user.role !== 'sede') throw httpError(403, 'Apenas a sede pode confirmar recebimento da prestação');
+    const body = z.object({ note: z.string().optional() }).parse(req.body || {});
+    const prestacao = await prisma.prestacao.findUnique({ where: { id: req.params.id } });
+    if (!prestacao) throw httpError(404, 'Prestação não encontrada');
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.prestacao.update({
+        where: { id: prestacao.id },
+        data: {
+          status: 'received',
+          reviewedBy: req.user.name || '',
+          reviewedAt: new Date(),
+          reviewNote: body.note || prestacao.reviewNote || '',
+          receivedById: req.user.sub ?? null,
+          receivedAt: new Date(),
+          receivedNote: body.note || prestacao.receivedNote || '',
+        },
+      });
+      await logAudit(tx, {
+        user: req.user,
+        action: 'prestacao.receive',
+        entity: 'Prestacao',
+        entityId: prestacao.id,
+        sectorId: prestacao.sectorId,
+        summary: 'Recebimento/confirmação da prestação pela sede',
+        before: { status: prestacao.status },
+        after: { status: 'received' },
+      });
+      return u;
+    });
+    res.json({ prestacao: serializePrestacao(updated) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/:id/reopen', async (req, res, next) => {
+  try {
+    if (req.user.role !== 'sede') throw httpError(403, 'Apenas a sede (perfil admin) pode reabrir prestações');
+    const body = z.object({ note: z.string().optional() }).parse(req.body || {});
+    const prestacao = await prisma.prestacao.findUnique({ where: { id: req.params.id } });
+    if (!prestacao) throw httpError(404, 'Prestação não encontrada');
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.prestacao.update({
+        where: { id: prestacao.id },
+        data: {
+          status: 'open',
+          reviewedBy: req.user.name || '',
+          reviewedAt: new Date(),
+          reviewNote: body.note || `Reaberta pela sede (${req.user.name || 'admin'})`,
+          submittedAt: null,
+        },
+      });
+      await logAudit(tx, {
+        user: req.user,
+        action: 'prestacao.reopen',
+        entity: 'Prestacao',
+        entityId: prestacao.id,
+        sectorId: prestacao.sectorId,
+        summary: 'Reabertura de prestação pela sede (admin)',
+        before: { status: prestacao.status },
+        after: { status: 'open' },
+      });
+      return u;
+    });
+    res.json({ prestacao: serializePrestacao(updated) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.put('/:id', async (req, res, next) => {
+  try {
+    if (req.user.role !== 'sede') throw httpError(403, 'Apenas a sede (perfil admin) pode alterar prestações diretamente');
+    const body = z.object({
+      declaredCash: z.number().nonnegative().optional(),
+      declaredPix: z.number().nonnegative().optional(),
+      note: z.string().optional().nullable(),
+      status: z.enum(['open', 'submitted', 'approved', 'rejected', 'received']).optional(),
+      reviewNote: z.string().optional().nullable(),
+    }).parse(req.body || {});
+    const prestacao = await prisma.prestacao.findUnique({ where: { id: req.params.id } });
+    if (!prestacao) throw httpError(404, 'Prestação não encontrada');
+    const data = {};
+    if (body.declaredCash !== undefined) data.declaredCash = body.declaredCash;
+    if (body.declaredPix !== undefined) data.declaredPix = body.declaredPix;
+    if (body.note !== undefined) data.note = body.note ?? '';
+    if (body.status !== undefined) data.status = body.status;
+    if (body.reviewNote !== undefined) data.reviewNote = body.reviewNote ?? '';
+    if (Object.keys(data).length) { data.reviewedBy = req.user.name || ''; data.reviewedAt = new Date(); }
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.prestacao.update({ where: { id: prestacao.id }, data });
+      await logAudit(tx, {
+        user: req.user,
+        action: 'prestacao.update_admin',
+        entity: 'Prestacao',
+        entityId: prestacao.id,
+        sectorId: prestacao.sectorId,
+        summary: 'Alteração administrativa de prestação pela sede',
+        before: { status: prestacao.status, declaredCash: Number(prestacao.declaredCash), declaredPix: Number(prestacao.declaredPix) },
+        after: { status: u.status, declaredCash: Number(u.declaredCash), declaredPix: Number(u.declaredPix) },
       });
       return u;
     });

@@ -178,6 +178,61 @@ router.put('/:id/confirm', async (req, res, next) => {
   }
 });
 
+const reviewSchema = z.object({
+  reviewStatus: z.enum(['pending', 'reviewed', 'flagged', 'voided']).optional(),
+  action: z.enum(['review', 'approve', 'flag', 'void', 'pending']).optional(),
+  note: z.string().max(500).optional().nullable(),
+});
+
+function resolveReviewStatus(action, reviewStatus) {
+  if (reviewStatus) return reviewStatus;
+  if (action === 'approve' || action === 'review') return 'reviewed';
+  if (action === 'flag') return 'flagged';
+  if (action === 'void') return 'voided';
+  if (action === 'pending') return 'pending';
+  return null;
+}
+
+// Validação/conferência administrativa do lançamento (Fase 1 controle financeiro).
+router.put('/:id/review', async (req, res, next) => {
+  try {
+    const data = reviewSchema.parse(req.body);
+    const nextStatus = resolveReviewStatus(data.action, data.reviewStatus);
+    if (!nextStatus) throw httpError(400, 'Informe action ou reviewStatus');
+    const existing = await prisma.receipt.findUnique({ where: { id: req.params.id } });
+    if (!existing) throw httpError(404, 'Recebimento não encontrado');
+    if (!canWriteReceipt(req.user, existing)) throw httpError(403, 'Sem permissão para validar este recebimento');
+
+    const receipt = await prisma.$transaction(async (tx) => {
+      const updated = await tx.receipt.update({
+        where: { id: existing.id },
+        data: {
+          reviewStatus: nextStatus,
+          reviewedById: req.user.sub,
+          reviewedByName: req.user.name || req.user.email || null,
+          reviewedAt: new Date(),
+          reviewNote: data.note ?? null,
+        },
+      });
+      await logAudit(tx, {
+        user: req.user,
+        action: 'receipt.review',
+        entity: 'Receipt',
+        entityId: existing.id,
+        sectorId: existing.sectorId,
+        congregationId: existing.congregationId,
+        summary: `Validação de ${existing.type}: ${nextStatus}`,
+        before: { reviewStatus: existing.reviewStatus, reviewNote: existing.reviewNote ?? null },
+        after: { reviewStatus: updated.reviewStatus, reviewNote: updated.reviewNote ?? null },
+      });
+      return updated;
+    });
+    res.json({ receipt: serializeReceipt(receipt) });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.put('/:id', async (req, res, next) => {
   try {
     const data = updateSchema.parse(req.body);
