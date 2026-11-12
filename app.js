@@ -12,8 +12,8 @@ function showVersionBadge() {
 }
 
 // ============ VERSAO DO SISTEMA ============
-const APP_VERSION = '2026-11-11-v17';
-const APP_BUILD = 'acerto-sede-selector';
+const APP_VERSION = '2026-11-11-v18';
+const APP_BUILD = 'sector-pending-congregations';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
@@ -4887,8 +4887,8 @@ function getClosureFor(scope, sectorId, congregationId, anyDateInWeek) {
     ((congregationId == null) ? (c.congregationId == null) : c.congregationId === congregationId));
 }
 
-function buildClosure(scope, sectorId, congregationId, sums, justification) {
-  const wk = weekKeyOf(displayedWeekStart());
+function buildClosure(scope, sectorId, congregationId, sums, justification, weekRef) {
+  const wk = weekKeyOf(weekRef || displayedWeekStart());
   return {
     id: `wk_${wk}_${scope}_${sectorId}_${congregationId == null ? 'all' : congregationId}`,
     weekStart: wk,
@@ -5952,12 +5952,24 @@ function renderPendingClosures() {
   const { start, end } = weekBounds(week);
   const range = `${start.toLocaleDateString('pt-BR')} a ${end.toLocaleDateString('pt-BR')}`;
 
-  const scoped = role === 'sede' ? sectorsData : sectorsData.filter(s => s.id === currentUser.sectorId);
-  const pending = scoped.filter(sec => !getClosureFor('setor', sec.id, null, week));
-
   card.style.display = 'block';
   if (grid) grid.classList.add('has-pending');
   $('pendingClosuresMeta').textContent = `${isoWeekInfo(week).label} • ${range} (seg–dom)`;
+
+  // Título/legenda variam por perfil: a sede acompanha setores; o setor
+  // acompanha as congregações que ainda não fecharam/validaram a semana.
+  const titleEl = $('pendingClosuresTitle');
+  const hintEl = $('pendingClosuresHint');
+  if (role === 'tesoureiro_setor') {
+    if (titleEl) titleEl.textContent = 'Congregações Pendentes';
+    if (hintEl) hintEl.textContent = 'Fechamento congregação → setor';
+    renderPendingCongregationsForSector(week);
+    return;
+  }
+  if (titleEl) titleEl.textContent = 'Setores Pendentes de Fechamento';
+  if (hintEl) hintEl.textContent = 'Repasse da prestação (dinheiro)';
+
+  const pending = sectorsData.filter(sec => !getClosureFor('setor', sec.id, null, week));
   $('pendingClosuresCount').textContent = pending.length ? `(${pending.length})` : '';
 
   if (!pending.length) {
@@ -5984,6 +5996,56 @@ function renderPendingClosures() {
     `<div style="border-top:1px solid #eee; margin-top:8px; padding-top:8px; font-size:13px; font-weight:700; display:flex; justify-content:space-between;">
       <span>Total a repassar (${pending.length} setor${pending.length > 1 ? 'es' : ''})</span><span>${fmtMoney(totalRepass)}</span>
     </div>`;
+}
+
+// Perfil setor: relação das congregações do setor que ainda estão em aberto
+// (não fecharam) ou fechadas aguardando validação do próprio setor.
+function renderPendingCongregationsForSector(week) {
+  const sector = sectorsData.find(s => s.id === currentUser?.sectorId);
+  const listEl = $('pendingClosuresList');
+  if (!sector) {
+    $('pendingClosuresCount').textContent = '';
+    if (listEl) listEl.innerHTML = `<div style="color:var(--text-muted); font-size:13px; padding:6px 0;">Setor não encontrado.</div>`;
+    return;
+  }
+
+  const wk = weekKeyFromAny(week);
+  const items = (sector.congregations || []).map(cong => {
+    const cl = getClosureFor('congregacao', sector.id, cong.id, week);
+    const status = cl ? cl.status : 'open';
+    const sums = weekSumsFor(scopeCong(sector.id, cong.id), week);
+    return { cong, cl, status, sums };
+  }).filter(x => x.status !== 'validated');
+
+  $('pendingClosuresCount').textContent = items.length ? `(${items.length})` : '';
+
+  if (!items.length) {
+    if (listEl) listEl.innerHTML = `<div style="color:var(--success); font-size:13px; padding:6px 0;">Todas as congregações do setor fecharam e foram validadas nesta semana. ✓</div>`;
+    return;
+  }
+
+  const rows = items.map(({ cong, cl, status, sums }) => {
+    const pct = Math.round((sums.ratio || 0) * 100);
+    const money = (sums.income || sums.expense)
+      ? `Rec. ${fmtMoney(sums.income)} • Desp. ${fmtMoney(sums.expense)} • ${pct}%`
+      : 'Sem movimentos na semana';
+    const action = status === 'open'
+      ? `<button type="button" class="btn btn-outline" style="padding:4px 10px; font-size:11px; white-space:nowrap;" onclick="closeCongregationForWeek(${sector.id}, ${cong.id}, '${wk}')">Fechar</button>`
+      : `<button type="button" class="btn btn-primary" style="padding:4px 10px; font-size:11px; white-space:nowrap;" onclick="validateCongregationClosureForWeek(${sector.id}, ${cong.id}, '${wk}')">Validar</button>`;
+    return `<div class="list-item" style="align-items:flex-start;">
+      <div class="list-item-info">
+        <div class="list-item-title" style="font-size:13px;">${esc(cong.code)} — ${esc(cong.name)}</div>
+        <div class="list-item-sub">${money}${sums.exceeded ? ' • <span style="color:var(--error); font-weight:700;">EXCEDEU 40%</span>' : ''}</div>
+        ${cl && cl.justification ? `<div class="list-item-sub" style="color:var(--text-muted);"><strong>Just.:</strong> ${esc(cl.justification)}</div>` : ''}
+      </div>
+      <div style="text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+        <div>${statusBadge(status)}</div>
+        <div>${action}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  if (listEl) listEl.innerHTML = rows;
 }
 
 // Abre a tela de fechamento na mesma semana do indicador (semana corrente)
@@ -6054,10 +6116,24 @@ async function closeCongregationWeek() {
   renderWeeklyClose();
 }
 
+// Converte uma chave de semana "YYYY-MM-DD" em Date local (sem deslocamento de fuso)
+function parseWeekKeyLocal(key) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key || ''));
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+// Resolve a semana de uma ação: chave "YYYY-MM-DD", Date ou semana exibida
+function resolveWeekRef(weekRef) {
+  if (!weekRef) return displayedWeekStart();
+  if (weekRef instanceof Date) return startOfWeekMonday(weekRef);
+  return parseWeekKeyLocal(weekRef) || displayedWeekStart();
+}
+
 // Fecha a semana de uma congregação a partir do painel do setor/sede (semana exibida)
-async function closeCongregationFor(sectorId, congregationId) {
+async function closeCongregationFor(sectorId, congregationId, weekRef) {
   if (!canManageClosureScope(sectorId)) return showToast('Sem permissão para fechar esta congregação', 'error');
-  const wk = displayedWeekStart();
+  const wk = resolveWeekRef(weekRef);
   const existing = getClosureFor('congregacao', sectorId, congregationId, wk);
   if (existing) return showToast('Esta semana já foi fechada.', 'warning');
 
@@ -6080,12 +6156,19 @@ async function closeCongregationFor(sectorId, congregationId) {
       await refreshAlerts().catch(() => {});
     } catch (e) { return apiErrorToast(e); }
   } else {
-    Storage.saveWeekClosure(buildClosure('congregacao', sectorId, congregationId, sums, justification));
+    Storage.saveWeekClosure(buildClosure('congregacao', sectorId, congregationId, sums, justification, wk));
     if (sums.exceeded) registerExcessAlert('congregacao', sectorId, congregationId, wk, sums, justification);
   }
   showToast('Semana da congregação fechada!', 'success');
   renderWeeklyClose();
+  if ($('screenDashboard')?.classList.contains('active')) renderDashboard();
 }
+
+// Fecha uma congregação numa semana explícita (usado pelo card do painel do setor)
+function closeCongregationForWeek(sectorId, congregationId, weekKey) {
+  return closeCongregationFor(sectorId, congregationId, weekKey);
+}
+
 
 function canManageClosureScope(sectorId) {
   if (!currentUser) return false;
@@ -6094,9 +6177,9 @@ function canManageClosureScope(sectorId) {
   return false;
 }
 
-async function validateCongregationClosure(sectorId, congregationId) {
+async function validateCongregationClosure(sectorId, congregationId, weekRef) {
   if (!canManageClosureScope(sectorId)) return showToast('Sem permissão para validar este setor', 'error');
-  const wk = displayedWeekStart();
+  const wk = resolveWeekRef(weekRef);
   const cl = getClosureFor('congregacao', sectorId, congregationId, wk);
   if (!cl) return showToast('Congregação ainda não fechou a semana', 'error');
 
@@ -6123,6 +6206,12 @@ async function validateCongregationClosure(sectorId, congregationId) {
   }
   showToast('Fechamento da congregação validado', 'success');
   renderWeeklyClose();
+  if ($('screenDashboard')?.classList.contains('active')) renderDashboard();
+}
+
+// Valida uma congregação numa semana explícita (usado pelo card do painel do setor)
+function validateCongregationClosureForWeek(sectorId, congregationId, weekKey) {
+  return validateCongregationClosure(sectorId, congregationId, weekKey);
 }
 
 async function closeSectorWeek(sectorId) {

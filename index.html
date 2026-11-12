@@ -983,11 +983,11 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
   <section class="screen screen--board" id="screenDashboard" data-title="Painel de Controle">
    <div class="dash-grid" id="dashGrid">
     <div class="dash-side" id="dashSide">
-    <!-- SETORES PENDENTES DE FECHAMENTO SEMANAL -->
+    <!-- PENDÊNCIAS DE FECHAMENTO SEMANAL (setores para a sede / congregações para o setor) -->
     <div class="card" id="pendingClosuresCard" style="display:none; border-left:4px solid var(--gold,#D4A843);">
       <div style="display:flex; justify-content:space-between; align-items:center;">
-        <h3 class="card-title" style="margin:0;">Setores Pendentes de Fechamento <span id="pendingClosuresCount" style="font-weight:400; color:var(--gold,#D4A843); font-size:13px;"></span></h3>
-        <span style="font-size:12px; color:var(--text-muted);">Repasse da prestação (dinheiro)</span>
+        <h3 class="card-title" style="margin:0;"><span id="pendingClosuresTitle">Setores Pendentes de Fechamento</span> <span id="pendingClosuresCount" style="font-weight:400; color:var(--gold,#D4A843); font-size:13px;"></span></h3>
+        <span id="pendingClosuresHint" style="font-size:12px; color:var(--text-muted);">Repasse da prestação (dinheiro)</span>
       </div>
       <div style="font-size:12px; color:var(--text-muted); margin:6px 0 8px;" id="pendingClosuresMeta">—</div>
       <div id="pendingClosuresList"></div>
@@ -1389,7 +1389,7 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
   <div class="toast" id="toast"></div>
 </div>
 
-<script src="app.js?v=25"></script>
+<script src="app.js?v=26"></script>
 
 
 <script src="mbw.js?v=12"></script>
