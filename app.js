@@ -12,8 +12,8 @@ function showVersionBadge() {
 }
 
 // ============ VERSAO DO SISTEMA ============
-const APP_VERSION = '2026-11-12-v20';
-const APP_BUILD = 'sede-weekly-receipt-module';
+const APP_VERSION = '2026-11-12-v21';
+const APP_BUILD = 'sede-weekly-receipt-kpis';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
@@ -5408,14 +5408,15 @@ async function renderSedeModule(force) {
 
 function renderSedeScreen() {
   const sectors = sedeWeekSectors();
-  let open = 0, submitted = 0, received = 0, divergences = 0, pendingCongs = 0;
+  let open = 0, submitted = 0, received = 0, rejected = 0, divergences = 0, pendingCongs = 0;
   const totals = { cash: 0, pix: 0, income: 0, expense: 0 };
   sectors.forEach((sec) => {
     const st = sedeSectorState(sec).key;
     const b = sedeBatimento(sec);
     if (st === 'open' || st === 'closed') open++;
-    if (st === 'submitted' || st === 'approved' || st === 'rejected') submitted++;
+    if (st === 'submitted' || st === 'approved') submitted++;
     if (st === 'received') received++;
+    if (st === 'rejected') rejected++;
     if (b.hasDivergence) divergences++;
     pendingCongs += (sec.totals && sec.totals.pending) || 0;
     if (sec.prestacao) {
@@ -5430,6 +5431,7 @@ function renderSedeScreen() {
   set('sedeKpiOpen', open);
   set('sedeKpiSubmitted', submitted);
   set('sedeKpiReceived', received);
+  set('sedeKpiRejected', rejected);
   set('sedeKpiDivergence', divergences);
   set('sedeKpiPendingCongs', pendingCongs);
   const line = $('sedeTotalsLine');
@@ -5447,7 +5449,7 @@ const SEDE_FILTERS = [
   { key: 'pending', label: 'Aguardando recepção' },
   { key: 'all', label: 'Todos' },
   { key: 'open', label: 'Em aberto' },
-  { key: 'submitted', label: 'Enviados' },
+  { key: 'submitted', label: 'Enviados / devolvidos' },
   { key: 'received', label: 'Recepcionados' },
   { key: 'divergence', label: 'Divergências' },
 ];
