@@ -12,8 +12,8 @@ function showVersionBadge() {
 }
 
 // ============ VERSAO DO SISTEMA ============
-const APP_VERSION = '2026-11-12-v19';
-const APP_BUILD = 'sector-pending-congregations-refresh';
+const APP_VERSION = '2026-11-12-v20';
+const APP_BUILD = 'sede-weekly-receipt-module';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
@@ -2296,6 +2296,7 @@ function startCollection() {
 function navigate(screenId) {
   // A câmera do leitor de QR só pode existir na tela de identificação da pessoa
   if (screenId !== 'screenPerson') stopQRScan();
+  if (screenId !== 'screenSede') closeSedeAttendance();
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   $(screenId).classList.add('active');
   $('topbarTitle').textContent = $(screenId).dataset.title || 'ADM Recebimentos';
@@ -2323,6 +2324,7 @@ function navigate(screenId) {
   if (screenId === 'screenWeeklyClose') { weeklyOverview = null; renderWeeklyClose(); }
   if (screenId === 'screenAdminWeeklyReceipts') adminWeeklyData = null;
   if (screenId === 'screenAdminWeeklyReceipts' && typeof renderAdminWeeklyReceipts === 'function') renderAdminWeeklyReceipts();
+  if (screenId === 'screenSede') { sedeData = null; renderSedeModule(); }
   if (screenId === 'screenFinanceControl') renderFinanceControl();
   if (screenId === 'screenConsultas') renderConsultasScreen();
   if (screenId === 'screenStructure') renderStructureScreen();;
@@ -2521,6 +2523,7 @@ function updateAdminNav() {
   const qs = $('qnavStructure'); if (qs) qs.style.display = canManage(currentUser) ? 'inline-block' : 'none';
   const qd = $('qnavDashboard'); if (qd) qd.style.display = canViewDashboard(currentUser) ? 'inline-block' : 'none';
   const qw = $('qnavWeekly'); if (qw) qw.style.display = canViewWeekly(currentUser) ? 'inline-block' : 'none';
+  const qsede = $('qnavSede'); if (qsede) qsede.style.display = currentUser?.role === 'sede' ? 'inline-block' : 'none';
 }
 
 // Fechamento semanal: sede, tesoureiro de setor e de congregação
@@ -2573,7 +2576,11 @@ function renderAdminScreen() {
     html += `<button class="btn btn-secondary" onclick="navigate('screenWeeklyClose')" style="text-align:left; justify-content:flex-start;">Fechamento Semanal (Seg a Dom)</button>`;
   }
   if (currentUser.role === 'sede') {
-    html += `<button class="btn btn-outline" onclick="navigate('screenAdminWeeklyReceipts')" style="text-align:left; justify-content:flex-start;">Recepcionar Fechamentos Semanais</button>`;
+    html += `<button class="btn btn-primary" onclick="navigate('screenSede')" style="text-align:left; justify-content:flex-start;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/></svg>
+      Módulo Sede — Receber setores da semana
+    </button>`;
+    html += `<button class="btn btn-outline" onclick="navigate('screenAdminWeeklyReceipts')" style="text-align:left; justify-content:flex-start;">Recepção rápida (tabela por setor)</button>`;
   }
 
   // --- Pessoas e cadastros ---
@@ -5306,6 +5313,412 @@ function renderAdminWeeklyTable() {
   if ($('awrClosed')) $('awrClosed').textContent = received;
   if ($('awrPending')) $('awrPending').textContent = pending;
   if ($('adminWeeklyMeta')) $('adminWeeklyMeta').textContent = wk.label ? `• ${wk.label}` : '';
+}
+
+// ============ MÓDULO SEDE: RECEBIMENTO SEMANAL DOS SETORES ============
+// Tela dedicada para o tesoureiro da sede conferir o relatório de cada setor:
+// - setores em aberto, enviados, recepcionados e com divergência de batimento;
+// - batimento caixa/PIX (esperado pelo movimento x declarado pelo setor);
+// - comprovantes de repasse/PIX e ações de aprovar, receber, devolver e reabrir.
+let sedeWeekOffset = 0;
+let sedeData = null; // { weekKey, week }
+let sedeLoading = false;
+let sedeFilter = 'pending';
+let sedeSearchTerm = '';
+let sedeSelectedSectorId = null;
+const SEDE_TOLERANCE = 0.01;
+
+function sedeWeekStart() {
+  const base = new Date();
+  base.setDate(base.getDate() + sedeWeekOffset * 7);
+  return startOfWeekMonday(base);
+}
+function shiftSedeWeek(n) { sedeWeekOffset += n; sedeData = null; renderSedeModule(true); }
+function goCurrentSedeWeek() { sedeWeekOffset = 0; sedeData = null; renderSedeModule(true); }
+function setSedeFilter(f) { sedeFilter = f; renderSedeScreen(); }
+function setSedeSearch(v) { sedeSearchTerm = v || ''; renderSedeSectorList(); }
+
+function sedeNum(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
+function money(v) { return fmtMoney(sedeNum(v)); }
+
+function sedeWeekSectors() {
+  return (sedeData && sedeData.week && sedeData.week.sectors) || [];
+}
+
+// Situação do setor no estágio setor -> sede (prestação de contas).
+function sedeSectorState(sec) {
+  const p = sec.prestacao;
+  const st = p ? p.status : 'open';
+  if (st === 'received') return { key: 'received', label: 'Recepcionado', color: 'var(--success)', bg: '#e8f5e9' };
+  if (st === 'approved') return { key: 'approved', label: 'Aprovado — confirmar recebimento', color: '#1565c0', bg: '#e3f2fd' };
+  if (st === 'submitted') return { key: 'submitted', label: 'Enviado — conferir', color: '#8a6d1d', bg: '#fff8e1' };
+  if (st === 'rejected') return { key: 'rejected', label: 'Devolvido ao setor', color: 'var(--error)', bg: '#ffebee' };
+  if (sec.closure) return { key: 'closed', label: 'Fechado — sem prestação', color: '#6d4c41', bg: '#efebe9' };
+  return { key: 'open', label: 'Em aberto', color: '#616161', bg: '#f5f5f5' };
+}
+
+// Batimento esperado x declarado (caixa e PIX/POS) a partir do snapshot do envio.
+function sedeBatimento(sec) {
+  const p = sec.prestacao;
+  const incomeBy = (p && p.incomeBy) || {};
+  const expenseBy = (p && p.expenseBy) || {};
+  const expCash = sedeNum(incomeBy.dinheiro) - sedeNum(expenseBy.dinheiro);
+  const expPix = (sedeNum(incomeBy.pix) + sedeNum(incomeBy.cartao))
+    - (sedeNum(expenseBy.pix) + sedeNum(expenseBy.cartao));
+  const declCash = p ? sedeNum(p.declaredCash) : null;
+  const declPix = p ? sedeNum(p.declaredPix) : null;
+  const diffCash = declCash == null ? null : declCash - expCash;
+  const diffPix = declPix == null ? null : declPix - expPix;
+  const hasDivergence = p != null && (
+    (diffCash != null && Math.abs(diffCash) > SEDE_TOLERANCE) ||
+    (diffPix != null && Math.abs(diffPix) > SEDE_TOLERANCE)
+  );
+  const income = Object.values(incomeBy).reduce((a, b) => a + sedeNum(b), 0);
+  const expense = Object.values(expenseBy).reduce((a, b) => a + sedeNum(b), 0);
+  return { expCash, expPix, declCash, declPix, diffCash, diffPix, hasDivergence, income, expense, balance: income - expense };
+}
+
+async function renderSedeModule(force) {
+  if (!currentUser || currentUser.role !== 'sede') {
+    showToast('Acesso restrito à sede', 'error');
+    return navigate('screenDashboard');
+  }
+  const week = sedeWeekStart();
+  const { start, end } = weekBounds(week);
+  if ($('sedeWeekLabel')) $('sedeWeekLabel').textContent = weekLabelWithNumber(start, end);
+  if (!HAS_FETCH_MODE()) {
+    if ($('sedeSectorList')) $('sedeSectorList').innerHTML = '<div style="padding:12px; text-align:center; color:var(--text-muted);">Disponível quando conectado ao servidor.</div>';
+    return;
+  }
+  if (sedeLoading) return;
+  const wkKey = weekKeyFromAny(week);
+  if (!force && sedeData && sedeData.weekKey === wkKey) { renderSedeScreen(); return; }
+  sedeLoading = true;
+  if ($('sedeSectorList')) $('sedeSectorList').innerHTML = '<div style="padding:12px; text-align:center; color:var(--text-muted);">Carregando setores da semana…</div>';
+  try {
+    const out = await Api.get('/api/closures/overview?weeks=1&week=' + encodeURIComponent(wkKey));
+    sedeData = { weekKey: wkKey, week: (out.weeks && out.weeks[0]) || null };
+    renderSedeScreen();
+  } catch (e) {
+    if ($('sedeSectorList')) $('sedeSectorList').innerHTML = `<div style="padding:12px; text-align:center; color:var(--error);">${esc(e.message || 'Falha ao carregar')}</div>`;
+  } finally {
+    sedeLoading = false;
+  }
+}
+
+function renderSedeScreen() {
+  const sectors = sedeWeekSectors();
+  let open = 0, submitted = 0, received = 0, divergences = 0, pendingCongs = 0;
+  const totals = { cash: 0, pix: 0, income: 0, expense: 0 };
+  sectors.forEach((sec) => {
+    const st = sedeSectorState(sec).key;
+    const b = sedeBatimento(sec);
+    if (st === 'open' || st === 'closed') open++;
+    if (st === 'submitted' || st === 'approved' || st === 'rejected') submitted++;
+    if (st === 'received') received++;
+    if (b.hasDivergence) divergences++;
+    pendingCongs += (sec.totals && sec.totals.pending) || 0;
+    if (sec.prestacao) {
+      totals.cash += sedeNum(b.declCash);
+      totals.pix += sedeNum(b.declPix);
+      totals.income += b.income;
+      totals.expense += b.expense;
+    }
+  });
+  const set = (id, v) => { const el = $(id); if (el) el.textContent = String(v); };
+  set('sedeKpiTotal', sectors.length);
+  set('sedeKpiOpen', open);
+  set('sedeKpiSubmitted', submitted);
+  set('sedeKpiReceived', received);
+  set('sedeKpiDivergence', divergences);
+  set('sedeKpiPendingCongs', pendingCongs);
+  const line = $('sedeTotalsLine');
+  if (line) {
+    line.innerHTML = `Prestações na semana: <strong>${money(totals.income)}</strong> em receitas e <strong style="color:var(--error);">${money(totals.expense)}</strong> em despesas • Declarado: caixa <strong>${money(totals.cash)}</strong> • PIX/POS <strong>${money(totals.pix)}</strong>`;
+  }
+  renderSedeFilterChips();
+  renderSedeSectorList();
+  renderSedeAttendance();
+  const last = $('sedeLastUpdate');
+  if (last) last.textContent = 'Atualizado às ' + new Date().toLocaleTimeString('pt-BR');
+}
+
+const SEDE_FILTERS = [
+  { key: 'pending', label: 'Aguardando recepção' },
+  { key: 'all', label: 'Todos' },
+  { key: 'open', label: 'Em aberto' },
+  { key: 'submitted', label: 'Enviados' },
+  { key: 'received', label: 'Recepcionados' },
+  { key: 'divergence', label: 'Divergências' },
+];
+
+function sedeMatchesFilter(sec, filter) {
+  const st = sedeSectorState(sec).key;
+  if (filter === 'all') return true;
+  if (filter === 'pending') return st !== 'received';
+  if (filter === 'open') return st === 'open' || st === 'closed';
+  if (filter === 'submitted') return st === 'submitted' || st === 'approved' || st === 'rejected';
+  if (filter === 'received') return st === 'received';
+  if (filter === 'divergence') return sedeBatimento(sec).hasDivergence;
+  return true;
+}
+
+function renderSedeFilterChips() {
+  const box = $('sedeFilterChips');
+  if (!box) return;
+  const sectors = sedeWeekSectors();
+  box.innerHTML = SEDE_FILTERS.map((f) => {
+    const count = sectors.filter((sec) => sedeMatchesFilter(sec, f.key)).length;
+    const active = sedeFilter === f.key;
+    return `<button type="button" class="btn ${active ? 'btn-primary' : 'btn-outline'}" style="padding:5px 10px; font-size:12px; border-radius:999px;" onclick="setSedeFilter('${f.key}')">${f.label} (${count})</button>`;
+  }).join('');
+}
+
+function renderSedeSectorList() {
+  const box = $('sedeSectorList');
+  if (!box) return;
+  const sectors = sedeWeekSectors();
+  if (!sectors.length) {
+    box.innerHTML = '<div style="padding:16px; text-align:center; color:var(--text-muted);">Nenhum setor encontrado para esta semana.</div>';
+    return;
+  }
+  const q = (sedeSearchTerm || '').trim().toLowerCase();
+  const list = sectors.filter((sec) => {
+    if (!sedeMatchesFilter(sec, sedeFilter)) return false;
+    if (!q) return true;
+    return String(sec.sectorName || '').toLowerCase().includes(q)
+      || String(sec.sectorCode || '').toLowerCase().includes(q);
+  });
+  if (!list.length) {
+    box.innerHTML = '<div style="padding:16px; text-align:center; color:var(--text-muted);">Nenhum setor neste filtro.</div>';
+    return;
+  }
+  box.innerHTML = list.map((sec) => sedeSectorCardHtml(sec)).join('');
+}
+
+function sedeSectorCardHtml(sec) {
+  const state = sedeSectorState(sec);
+  const b = sedeBatimento(sec);
+  const p = sec.prestacao;
+  const t = sec.totals || {};
+  const sentAt = p && p.submittedAt ? new Date(p.submittedAt).toLocaleString('pt-BR') : '';
+  const recvAt = p && p.receivedAt ? new Date(p.receivedAt).toLocaleString('pt-BR') : '';
+  const divTotal = Math.abs(sedeNum(b.diffCash)) + Math.abs(sedeNum(b.diffPix));
+  const divChip = b.hasDivergence
+    ? `<span style="background:#ffebee; color:var(--error); padding:2px 8px; border-radius:10px; font-size:11px; font-weight:700;">Divergência ${money(divTotal)}</span>`
+    : '';
+  const receiveBtn = p && (p.status === 'submitted' || p.status === 'approved')
+    ? `<button type="button" class="btn btn-primary" style="padding:6px 10px; font-size:12px;" onclick="sedeQuickReceive('${esc(p.id)}')">Receber</button>`
+    : '';
+  return `<div style="border:1px solid var(--border); border-left:4px solid ${state.color}; border-radius:10px; padding:10px; margin-bottom:8px; background:#fff;">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; flex-wrap:wrap;">
+      <div style="flex:1; min-width:200px;">
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <strong>${esc(sec.sectorCode)} — ${esc(sec.sectorName)}</strong>
+          <span style="background:${state.bg}; color:${state.color}; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:700;">${state.label}</span>
+          ${divChip}
+        </div>
+        <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+          Congregações: ${sedeNum(t.validated)} validadas • ${sedeNum(t.closed)} fechadas • ${sedeNum(t.open)} abertas
+          ${sentAt ? ` • Enviado em ${sentAt}` : ''}${recvAt ? ` • Recebido em ${recvAt}` : ''}
+        </div>
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin-top:6px; font-size:12px;">
+          <span>Caixa: <strong>${p ? money(b.declCash) : '—'}</strong></span>
+          <span>PIX/POS: <strong>${p ? money(b.declPix) : '—'}</strong></span>
+          <span>Receitas: <strong>${money(b.income)}</strong></span>
+          <span>Despesas: <strong style="color:var(--error);">${money(b.expense)}</strong></span>
+        </div>
+      </div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+        <button type="button" class="btn btn-outline" style="padding:6px 10px; font-size:12px;" onclick="openSedeAttendance(${Number(sec.sectorId)})">${p ? 'Atender' : 'Ver setor'}</button>
+        ${receiveBtn}
+      </div>
+    </div>
+  </div>`;
+}
+
+function openSedeAttendance(sectorId) {
+  sedeSelectedSectorId = Number(sectorId);
+  renderSedeAttendance();
+  const ov = $('sedeAttendanceOverlay');
+  if (ov) ov.style.display = 'block';
+  if (typeof document !== 'undefined' && document.body) document.body.style.overflow = 'hidden';
+}
+
+function closeSedeAttendance() {
+  const ov = $('sedeAttendanceOverlay');
+  if (ov) ov.style.display = 'none';
+  if (typeof document !== 'undefined' && document.body) document.body.style.overflow = '';
+  sedeSelectedSectorId = null;
+}
+
+function sedeDiffHtml(diff) {
+  if (diff == null) return '<span style="color:var(--text-muted);">—</span>';
+  const ok = Math.abs(diff) <= SEDE_TOLERANCE;
+  const color = ok ? 'var(--success)' : 'var(--error)';
+  const sign = diff > 0 ? '+' : '';
+  return `<span style="color:${color}; font-weight:700;">${sign}${money(diff)}</span>`;
+}
+
+function sedeProofLink(proof, label) {
+  if (!proof || !proof.data) return '';
+  let href = String(proof.data);
+  if (!href.startsWith('data:')) {
+    href = 'data:' + (proof.type || 'application/octet-stream') + ';base64,' + href;
+  }
+  return `<a class="btn btn-outline" style="padding:6px 10px; font-size:12px; text-decoration:none;" href="${esc(href)}" download="${esc(proof.name || label)}" target="_blank" rel="noopener">${esc(label)}</a>`;
+}
+
+function sedeCongregationRows(sec) {
+  const congs = sec.congregations || [];
+  if (!congs.length) return '<div style="font-size:13px; color:var(--text-muted);">Nenhuma congregação cadastrada neste setor.</div>';
+  return `<div style="overflow-x:auto; margin-top:6px;"><table style="width:100%; border-collapse:collapse; font-size:12px;">
+    <thead><tr style="background:var(--bg);">
+      <th style="text-align:left; padding:6px; border:1px solid var(--border);">Congregação</th>
+      <th style="text-align:center; padding:6px; border:1px solid var(--border);">Status</th>
+      <th style="text-align:right; padding:6px; border:1px solid var(--border);">Receitas</th>
+      <th style="text-align:right; padding:6px; border:1px solid var(--border);">Despesas</th>
+      <th style="text-align:center; padding:6px; border:1px solid var(--border);">%</th>
+    </tr></thead>
+    <tbody>${congs.map((c) => `<tr>
+      <td style="padding:6px; border:1px solid var(--border);">${esc(c.code)} — ${esc(c.name)}</td>
+      <td style="padding:6px; border:1px solid var(--border); text-align:center;">${statusBadge(c.status)}</td>
+      <td style="padding:6px; border:1px solid var(--border); text-align:right;">${money(c.income)}</td>
+      <td style="padding:6px; border:1px solid var(--border); text-align:right; color:var(--error);">${money(c.expense)}</td>
+      <td style="padding:6px; border:1px solid var(--border); text-align:center; color:${c.exceeded ? 'var(--error)' : 'inherit'};">${Math.round(sedeNum(c.ratio) * 100)}%${c.exceeded ? ' ⚠' : ''}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+function renderSedeAttendance() {
+  const card = $('sedeAttendanceCard');
+  const ov = $('sedeAttendanceOverlay');
+  if (!card || !ov) return;
+  if (sedeSelectedSectorId == null) {
+    ov.style.display = 'none';
+    card.innerHTML = '';
+    return;
+  }
+  const sec = sedeWeekSectors().find((s) => Number(s.sectorId) === Number(sedeSelectedSectorId));
+  if (!sec) { closeSedeAttendance(); return; }
+  const state = sedeSectorState(sec);
+  const b = sedeBatimento(sec);
+  const p = sec.prestacao;
+  const wk = sedeData && sedeData.week;
+  const period = wk ? `${new Date(wk.periodStart).toLocaleDateString('pt-BR')} a ${new Date(wk.periodEnd).toLocaleDateString('pt-BR')}` : '';
+
+  const batimento = `
+    <div class="confirm-grid" style="grid-template-columns:repeat(3,1fr); margin-top:8px;">
+      <div class="confirm-item"><div class="confirm-label">Caixa esperado</div><div class="confirm-value">${money(b.expCash)}</div></div>
+      <div class="confirm-item"><div class="confirm-label">Caixa declarado</div><div class="confirm-value">${p ? money(b.declCash) : '—'}</div></div>
+      <div class="confirm-item"><div class="confirm-label">Diferença caixa</div><div class="confirm-value">${sedeDiffHtml(b.diffCash)}</div></div>
+      <div class="confirm-item"><div class="confirm-label">PIX/POS esperado</div><div class="confirm-value">${money(b.expPix)}</div></div>
+      <div class="confirm-item"><div class="confirm-label">PIX/POS declarado</div><div class="confirm-value">${p ? money(b.declPix) : '—'}</div></div>
+      <div class="confirm-item"><div class="confirm-label">Diferença PIX/POS</div><div class="confirm-value">${sedeDiffHtml(b.diffPix)}</div></div>
+    </div>
+    <div class="confirm-grid" style="grid-template-columns:repeat(3,1fr); margin-top:8px;">
+      <div class="confirm-item"><div class="confirm-label">Receitas da semana</div><div class="confirm-value amount">${money(b.income)}</div></div>
+      <div class="confirm-item"><div class="confirm-label">Despesas da semana</div><div class="confirm-value" style="color:var(--error);">${money(b.expense)}</div></div>
+      <div class="confirm-item"><div class="confirm-label">Saldo</div><div class="confirm-value">${money(b.balance)}</div></div>
+    </div>`;
+
+  const docs = p ? `
+    <div style="margin-top:12px;">
+      <div style="font-size:13px; font-weight:700; margin-bottom:6px;">Comprovantes enviados</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        ${sedeProofLink(p.repasseProof, 'Comprovante de repasse') || '<span style="font-size:12px; color:var(--text-muted);">Sem comprovante de repasse.</span>'}
+        ${(p.pixProofs || []).map((pr, i) => sedeProofLink(pr, 'Comprovante PIX ' + (i + 1))).join('')}
+      </div>
+    </div>` : '';
+
+  const noteBlock = p ? `
+    <div style="margin-top:12px;">
+      <label class="form-label">Observação / motivo da devolução</label>
+      <textarea class="form-input" id="sedeAttendanceNote" rows="2" placeholder="Ex.: divergência de PIX, comprovante ilegível, valor de caixa não confere…">${esc(p.receivedNote || p.reviewNote || '')}</textarea>
+      ${p.note ? `<div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Observação do setor: ${esc(p.note)}</div>` : ''}
+    </div>` : '';
+
+  const actions = p ? `
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
+      ${p.status === 'submitted' ? `<button type="button" class="btn btn-outline" onclick="sedePrestacaoAction('${esc(p.id)}','approve')">Aprovar</button>` : ''}
+      ${(p.status === 'submitted' || p.status === 'approved') ? `<button type="button" class="btn btn-primary" style="background:var(--success); border-color:var(--success);" onclick="sedePrestacaoAction('${esc(p.id)}','receive')">Confirmar recebimento</button>` : ''}
+      ${(p.status === 'submitted' || p.status === 'approved') ? `<button type="button" class="btn btn-outline" style="color:var(--error); border-color:var(--error);" onclick="sedePrestacaoAction('${esc(p.id)}','reject')">Devolver ao setor</button>` : ''}
+      ${(p.status === 'received' || p.status === 'rejected' || p.status === 'approved') ? `<button type="button" class="btn btn-ghost" onclick="sedePrestacaoAction('${esc(p.id)}','reopen')">Reabrir</button>` : ''}
+    </div>` : '';
+
+  const timeline = p ? `
+    <div style="font-size:12px; color:var(--text-muted); margin-top:10px; line-height:1.7;">
+      ${p.submittedAt ? `Enviado pelo setor em <strong>${new Date(p.submittedAt).toLocaleString('pt-BR')}</strong><br>` : ''}
+      ${p.reviewedAt ? `Analisado por <strong>${esc(p.reviewedBy || '—')}</strong> em ${new Date(p.reviewedAt).toLocaleString('pt-BR')}<br>` : ''}
+      ${p.receivedAt ? `Recebido pela sede em <strong>${new Date(p.receivedAt).toLocaleString('pt-BR')}</strong>` : ''}
+    </div>` : '';
+
+  const sectorClosure = sec.closure ? `
+    <div style="margin-top:10px; padding:8px 10px; background:var(--bg); border-radius:8px; font-size:12px;">
+      Fechamento do setor: ${statusBadge(sec.closure.status)}
+      <span style="color:var(--text-muted);"> • Receitas ${money(sec.closure.income)} • Despesas ${money(sec.closure.expense)} • Saldo ${money(sec.closure.balance)}</span>
+    </div>` : '';
+
+  card.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; flex-wrap:wrap;">
+      <div>
+        <h3 class="card-title" style="margin:0;">${esc(sec.sectorCode)} — ${esc(sec.sectorName)}</h3>
+        <div style="font-size:12px; color:var(--text-muted);">${wk ? esc(wk.label) : ''}${period ? ' • ' + period : ''}</div>
+      </div>
+      <button type="button" class="btn btn-ghost" style="padding:4px 10px; font-size:18px;" onclick="closeSedeAttendance()" aria-label="Fechar">✕</button>
+    </div>
+    <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      <span style="background:${state.bg}; color:${state.color}; padding:3px 10px; border-radius:10px; font-size:12px; font-weight:700;">${state.label}</span>
+      ${b.hasDivergence ? '<span style="background:#ffebee; color:var(--error); padding:3px 10px; border-radius:10px; font-size:12px; font-weight:700;">Batimento divergente — confira antes de receber</span>' : ''}
+    </div>
+    ${p ? batimento : `<div style="margin-top:10px; padding:10px; background:var(--bg); border-radius:8px; font-size:13px; color:var(--text-muted);">O setor ainda não enviou a prestação desta semana. Você pode acompanhar o andamento das congregações abaixo.</div>`}
+    ${docs}
+    ${sectorClosure}
+    <div style="margin-top:12px;">
+      <div style="font-size:13px; font-weight:700; margin-bottom:2px;">Congregações do setor</div>
+      ${sedeCongregationRows(sec)}
+    </div>
+    ${timeline}
+    ${noteBlock}
+    ${actions}
+    <div style="display:flex; justify-content:flex-end; margin-top:12px;">
+      <button type="button" class="btn btn-ghost" onclick="closeSedeAttendance()">Fechar atendimento</button>
+    </div>`;
+}
+
+async function sedeQuickReceive(id) {
+  const sec = sedeWeekSectors().find((s) => s.prestacao && String(s.prestacao.id) === String(id));
+  if (sec && sedeBatimento(sec).hasDivergence) {
+    openSedeAttendance(sec.sectorId);
+    showToast('Há divergência no batimento. Confira antes de receber.', 'warning');
+    return;
+  }
+  try {
+    await Api.post('/api/prestacoes/' + encodeURIComponent(id) + '/receive', {});
+    showToast('Recebimento confirmado', 'success');
+    sedeData = null;
+    await renderSedeModule(true);
+  } catch (e) { apiErrorToast(e); }
+}
+
+async function sedePrestacaoAction(id, action) {
+  const noteEl = $('sedeAttendanceNote');
+  const note = noteEl ? String(noteEl.value || '').trim() : '';
+  if (action === 'reject' && !note) {
+    showToast('Informe o motivo da devolução no campo de observação.', 'warning');
+    if (noteEl) noteEl.focus();
+    return;
+  }
+  try {
+    await Api.post('/api/prestacoes/' + encodeURIComponent(id) + '/' + action, note ? { note } : {});
+    const msg = action === 'receive' ? 'Recebimento confirmado'
+      : action === 'approve' ? 'Prestação aprovada'
+      : action === 'reject' ? 'Prestação devolvida ao setor'
+      : 'Prestação reaberta';
+    showToast(msg, 'success');
+    sedeData = null;
+    await renderSedeModule(true);
+  } catch (e) { apiErrorToast(e); }
 }
 
 function renderWeeklyClosurePanel() {
