@@ -12,8 +12,8 @@ function showVersionBadge() {
 }
 
 // ============ VERSAO DO SISTEMA ============
-const APP_VERSION = '2026-11-11-v18';
-const APP_BUILD = 'sector-pending-congregations';
+const APP_VERSION = '2026-11-12-v19';
+const APP_BUILD = 'sector-pending-congregations-refresh';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
@@ -446,10 +446,20 @@ function mapExpense(e) {
   };
 }
 
+// Chave da semana (segunda) a partir de uma data vinda do servidor.
+// O backend grava a segunda-feira à meia-noite do fuso do servidor; usar a
+// parte UTC evita deslocar a semana em clientes a oeste de UTC (ex.: Brasil).
+function weekKeyFromServer(value) {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) {
+    return value.slice(0, 10);
+  }
+  return weekKeyOf(value);
+}
+
 function mapClosure(c) {
   return {
     id: c.id,
-    weekStart: dateKey(startOfWeekMonday(c.weekStart)),
+    weekStart: weekKeyFromServer(c.weekStart),
     scope: c.scope,
     sectorId: c.sectorId,
     congregationId: c.congregationId ?? null,
@@ -472,7 +482,7 @@ function mapAlert(a) {
   return {
     id: a.id,
     type: a.type,
-    weekStart: dateKey(startOfWeekMonday(a.weekStart)),
+    weekStart: weekKeyFromServer(a.weekStart),
     scope: a.scope,
     sectorId: a.sectorId,
     congregationId: a.congregationId ?? null,
@@ -519,11 +529,12 @@ async function refreshAlerts() {
 }
 
 function mapPrestacao(p) {
+  const wk = weekKeyFromServer(p.weekStart);
   return {
-    id: prestacaoId(p.sectorId, new Date(p.weekStart)),
+    id: `prest_${wk}_${p.sectorId}`,
     serverId: p.id,
     sectorId: p.sectorId,
-    weekStart: dateKey(startOfWeekMonday(p.weekStart)),
+    weekStart: wk,
     status: p.status,
     declaredCash: p.declaredCash,
     declaredPix: p.declaredPix,
@@ -5932,6 +5943,25 @@ function pendingClosureWeek() {
   return startOfWeekMonday(new Date());
 }
 
+// Garante que o card de pendências use os fechamentos atualizados do servidor.
+// Sem isso, logo após o login o cache local pode estar vazio/antigo e todas as
+// congregações apareceriam como "Aberta" mesmo já tendo fechado.
+let pendingClosuresRefreshKey = null;
+function ensurePendingClosuresFresh(week) {
+  if (!HAS_FETCH_MODE()) return;
+  const key = weekKeyFromAny(week);
+  if (pendingClosuresRefreshKey === key) return;
+  pendingClosuresRefreshKey = key;
+  (async () => {
+    try {
+      await refreshWeekClosures(week);
+      renderPendingClosures();
+    } catch (e) {
+      pendingClosuresRefreshKey = null; // permite nova tentativa no próximo render
+    }
+  })();
+}
+
 // Valor da prestação a repassar (dinheiro) de um setor numa semana
 function prestacaoRepassFor(sectorId, week) {
   const p = getPrestacao(sectorId, week);
@@ -5949,6 +5979,7 @@ function renderPendingClosures() {
   if (role !== 'sede' && role !== 'tesoureiro_setor') { card.style.display = 'none'; if (grid) grid.classList.remove('has-pending'); return; }
 
   const week = pendingClosureWeek();
+  ensurePendingClosuresFresh(week);
   const { start, end } = weekBounds(week);
   const range = `${start.toLocaleDateString('pt-BR')} a ${end.toLocaleDateString('pt-BR')}`;
 
