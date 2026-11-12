@@ -5,6 +5,7 @@ const prisma = new PrismaClient();
 
 const DEFAULT_USERS = [
   { email: 'admin@adm.org.br', password: '123456', name: 'Administrador Sede', role: 'sede', sectorId: null, congregationId: null, memberCode: null },
+  { email: 'sede@admin.org.br', password: '123456', name: 'Tesouraria Sede', role: 'sede', sectorId: null, congregationId: null, memberCode: null },
   { email: 'setor@adm.org.br', password: '123456', name: 'José Tes. Setor', role: 'tesoureiro_setor', sectorId: 8, congregationId: null, memberCode: null },
   { email: 'cong@adm.org.br', password: '123456', name: 'Ana Tes. Congregação', role: 'tesoureiro_congregacao', sectorId: 8, congregationId: 45, memberCode: null },
   { email: 'coletor@adm.org.br', password: '123456', name: 'Maria Coletora', role: 'coletor', sectorId: 8, congregationId: 45, memberCode: null },
@@ -71,7 +72,7 @@ async function main() {
   await seedSectors();
   await seedUsers();
   await resetSequences();
-  console.log('Seed concluído: 20 setores, 120 congregações, 6 usuários.');
+  console.log('Seed concluído: 20 setores, 120 congregações, 7 usuários.');
 }
 
 main()

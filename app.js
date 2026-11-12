@@ -12,8 +12,8 @@ function showVersionBadge() {
 }
 
 // ============ VERSAO DO SISTEMA ============
-const APP_VERSION = '2026-11-12-v21';
-const APP_BUILD = 'sede-weekly-receipt-kpis';
+const APP_VERSION = '2026-11-12-v22';
+const APP_BUILD = 'sede-login-example-user';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
@@ -72,6 +72,7 @@ const ROLE_NEEDS_CONG = ['tesoureiro_congregacao', 'coletor', 'membro'];
 // ============ USUÁRIOS ============
 const DEFAULT_USERS = [
   { email: 'admin@adm.org.br',       password: '123456', name: 'Administrador Sede',  role: 'sede',                 sectorId: null, congregationId: null, memberCode: null },
+  { email: 'sede@admin.org.br',      password: '123456', name: 'Tesouraria Sede',     role: 'sede',                 sectorId: null, congregationId: null, memberCode: null },
   { email: 'setor@adm.org.br',       password: '123456', name: 'José Tes. Setor',     role: 'tesoureiro_setor',     sectorId: 8,    congregationId: null, memberCode: null },
   { email: 'cong@adm.org.br',        password: '123456', name: 'Ana Tes. Congregação',role: 'tesoureiro_congregacao', sectorId: 8,  congregationId: 45,   memberCode: null },
   { email: 'coletor@adm.org.br',     password: '123456', name: 'Maria Coletora',      role: 'coletor',              sectorId: 8,    congregationId: 45,   memberCode: null },
