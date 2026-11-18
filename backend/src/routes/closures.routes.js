@@ -36,6 +36,34 @@ function getClosure(scope, sectorId, congregationId, weekStart) {
   });
 }
 
+// Despesas da congregação na semana que ainda não foram aprovadas pelo setor.
+// Enquanto existir qualquer uma, a congregação não pode fechar/validar a semana.
+async function pendingExpensesForCongregation(congregationId, weekStart) {
+  const { start, end } = weekBounds(weekStart);
+  const where = {
+    congregationId,
+    date: { gte: start, lte: end },
+    NOT: [{ status: 'voided' }, { reviewStatus: 'voided' }],
+    OR: [
+      { status: { in: ['pending', 'rejected'] } },
+      { reviewStatus: { in: ['pending', 'rejected', 'flagged'] } },
+    ],
+  };
+  const [count, agg] = await Promise.all([
+    prisma.expense.count({ where }),
+    prisma.expense.aggregate({ where, _sum: { value: true } }),
+  ]);
+  return { count, total: Number(agg._sum.value || 0) };
+}
+
+function pendingExpensesError(pending) {
+  const valor = pending.total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return httpError(
+    400,
+    `Existem ${pending.count} despesa(s) aguardando aprovação do setor nesta semana (R$ ${valor}). Aprove ou rejeite as despesas antes de fechar o movimento.`
+  );
+}
+
 async function upsertAlert(db, { scope, sectorId, congregationId, weekStart, sums, justification, user }) {
   const cid = congregationId ?? null;
   const existing = await db.alert.findFirst({ where: { scope, sectorId, congregationId: cid, weekStart } });
@@ -322,6 +350,13 @@ router.post('/close', async (req, res, next) => {
       const existing = await getClosure('congregacao', cong.sectorId, cong.id, weekStart);
       if (existing) return res.status(200).json({ closure: serializeClosure(existing) });
 
+      // Regra: a congregação só fecha o movimento depois que o setor aprovar
+      // todas as despesas da semana. A sede (superusuário auditado) pode liberar.
+      if (req.user.role !== 'sede') {
+        const pendingExpenses = await pendingExpensesForCongregation(cong.id, weekStart);
+        if (pendingExpenses.count > 0) throw pendingExpensesError(pendingExpenses);
+      }
+
       const sums = await weekSums({ congregationId: cong.id }, weekStart);
       const closure = await prisma.$transaction(async (tx) => {
         const created = await tx.weekClosure.create({
@@ -419,6 +454,10 @@ router.post('/:id/validate', async (req, res, next) => {
     const closure = await prisma.weekClosure.findUnique({ where: { id: req.params.id } });
     if (!closure) throw httpError(404, 'Fechamento não encontrado');
     if (!canManageClosure(req.user, closure.sectorId, closure.congregationId)) throw httpError(403, 'Sem permissão para validar este fechamento');
+    if (closure.scope === 'congregacao' && req.user.role !== 'sede') {
+      const pendingExpenses = await pendingExpensesForCongregation(closure.congregationId, closure.weekStart);
+      if (pendingExpenses.count > 0) throw pendingExpensesError(pendingExpenses);
+    }
     const updated = await prisma.$transaction(async (tx) => {
       const u = await tx.weekClosure.update({
         where: { id: closure.id },

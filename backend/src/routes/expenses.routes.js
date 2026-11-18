@@ -46,6 +46,18 @@ function canWriteExpense(user, e) {
   return false;
 }
 
+// Quem aprova/rejeita despesa é o setor responsável ou a sede. A própria
+// congregação nunca aprova as contas que lançou.
+function isExpenseReviewer(user) {
+  return user.role === 'sede' || user.role === 'tesoureiro_setor';
+}
+
+function canReviewExpense(user, e) {
+  if (user.role === 'sede') return true;
+  if (user.role === 'tesoureiro_setor') return e.sectorId === user.sectorId;
+  return false;
+}
+
 function expenseScopeWhere(user) {
   if (user.role === 'sede') return {};
   if (user.role === 'tesoureiro_setor') return { sectorId: user.sectorId };
@@ -93,6 +105,9 @@ router.post('/', async (req, res, next) => {
   try {
     const data = createSchema.parse(req.body);
     const scope = await resolveReceiptScope(prisma, req.user, data);
+    // Despesa lançada por setor/sede já entra aprovada (quem aprova é o setor).
+    // Despesa lançada pela congregação aguarda aprovação do setor.
+    const autoApprove = isExpenseReviewer(req.user);
     const expense = await prisma.$transaction(async (tx) => {
       const created = await tx.expense.create({
         data: {
@@ -101,8 +116,11 @@ router.post('/', async (req, res, next) => {
           description: data.description ?? null,
           value: data.value,
           payment: data.payment || 'dinheiro',
-          status: 'pending',
-          reviewStatus: 'pending',
+          status: autoApprove ? 'approved' : 'pending',
+          reviewStatus: autoApprove ? 'approved' : 'pending',
+          reviewedById: autoApprove ? req.user.sub : null,
+          reviewedByName: autoApprove ? (req.user.name || req.user.email || null) : null,
+          reviewedAt: autoApprove ? new Date() : null,
           sectorId: scope.sectorId,
           congregationId: scope.congregationId,
           proofName: data.comprovante.name,
@@ -157,7 +175,9 @@ router.put('/:id/review', async (req, res, next) => {
     if (!resolved.reviewStatus && !resolved.status) throw httpError(400, 'Informe action, reviewStatus ou status');
     const existing = await prisma.expense.findUnique({ where: { id: req.params.id } });
     if (!existing) throw httpError(404, 'Despesa não encontrada');
-    if (!canWriteExpense(req.user, existing)) throw httpError(403, 'Sem permissão para validar esta despesa');
+    if (!canReviewExpense(req.user, existing)) {
+      throw httpError(403, 'Apenas o tesoureiro de setor ou a sede podem aprovar despesas');
+    }
 
     const expense = await prisma.$transaction(async (tx) => {
       const updated = await tx.expense.update({
@@ -197,6 +217,26 @@ router.put('/:id', async (req, res, next) => {
     if (!existing) throw httpError(404, 'Despesa não encontrada');
     if (!canWriteExpense(req.user, existing)) throw httpError(403, 'Sem permissão para alterar esta despesa');
 
+    // Edição feita pela congregação volta para a fila de aprovação do setor.
+    // Edição feita pelo setor/sede já é considerada aprovada por quem revisou.
+    const reviewer = isExpenseReviewer(req.user);
+    const reviewReset = reviewer
+      ? {
+          status: 'approved',
+          reviewStatus: 'approved',
+          reviewedById: req.user.sub,
+          reviewedByName: req.user.name || req.user.email || null,
+          reviewedAt: new Date(),
+        }
+      : {
+          status: 'pending',
+          reviewStatus: 'pending',
+          reviewedById: null,
+          reviewedByName: null,
+          reviewedAt: null,
+          reviewNote: null,
+        };
+
     const expense = await prisma.$transaction(async (tx) => {
       const updated = await tx.expense.update({
         where: { id: req.params.id },
@@ -210,6 +250,7 @@ router.put('/:id', async (req, res, next) => {
           proofType: data.comprovante ? data.comprovante.type : existing.proofType,
           proofSize: data.comprovante ? data.comprovante.size : existing.proofSize,
           proofData: data.comprovante ? data.comprovante.data : existing.proofData,
+          ...reviewReset,
         },
       });
       await logAudit(tx, {
@@ -220,8 +261,8 @@ router.put('/:id', async (req, res, next) => {
         sectorId: existing.sectorId,
         congregationId: existing.congregationId,
         summary: `Alteração de ${existing.category}`,
-        before: { category: existing.category, value: Number(existing.value), payment: existing.payment, description: existing.description ?? '' },
-        after: { category: updated.category, value: Number(updated.value), payment: updated.payment, description: updated.description ?? '' },
+        before: { category: existing.category, value: Number(existing.value), payment: existing.payment, description: existing.description ?? '', reviewStatus: existing.reviewStatus, status: existing.status },
+        after: { category: updated.category, value: Number(updated.value), payment: updated.payment, description: updated.description ?? '', reviewStatus: updated.reviewStatus, status: updated.status },
       });
       return updated;
     });

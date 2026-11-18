@@ -12,8 +12,8 @@ function showVersionBadge() {
 }
 
 // ============ VERSAO DO SISTEMA ============
-const APP_VERSION = '2026-11-12-v22';
-const APP_BUILD = 'sede-login-example-user';
+const APP_VERSION = '2026-11-18-v23';
+const APP_BUILD = 'congregation-expense-approval';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
@@ -439,12 +439,70 @@ function mapExpense(e) {
     description: e.description || '',
     value: e.value,
     payment: e.payment,
+    status: e.status || 'approved',
+    reviewStatus: e.reviewStatus || 'approved',
+    reviewNote: e.reviewNote || '',
+    reviewedByName: e.reviewedByName || '',
+    reviewedAt: e.reviewedAt || null,
     sectorId: e.sectorId,
     congregationId: e.congregationId,
     comprovante: e.comprovante || null,
     createdBy: e.createdBy || '',
     createdAt: e.createdAt,
   };
+}
+
+// Estado de aprovação da despesa: aprovada somente depois do setor/sede revisar.
+function expenseReviewState(e) {
+  const st = (e && e.status) || 'approved';
+  const rs = (e && e.reviewStatus) || 'approved';
+  if (st === 'voided' || rs === 'voided') return 'voided';
+  if (st === 'rejected' || rs === 'rejected') return 'rejected';
+  if (rs === 'flagged') return 'flagged';
+  if (st === 'pending' || rs === 'pending') return 'pending';
+  if (st === 'paid') return 'paid';
+  return 'approved';
+}
+
+function isExpenseApproved(e) {
+  const s = expenseReviewState(e);
+  return s === 'approved' || s === 'paid';
+}
+
+function expenseReviewBadge(e) {
+  const s = expenseReviewState(e);
+  if (s === 'pending') return '<span style="background:var(--gold,#D4A843); color:#1A1A1A; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">Aguardando aprovação do setor</span>';
+  if (s === 'flagged') return '<span style="background:#fff3cd; color:#8a6d3b; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">Sinalizada pelo setor</span>';
+  if (s === 'rejected') return '<span style="background:var(--error); color:white; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">Rejeitada pelo setor</span>';
+  if (s === 'voided') return '<span style="background:#ccc; color:#333; padding:2px 8px; border-radius:10px; font-size:11px;">Anulada</span>';
+  if (s === 'paid') return '<span style="background:var(--success); color:white; padding:2px 8px; border-radius:10px; font-size:11px;">Paga</span>';
+  return '<span style="background:var(--success); color:white; padding:2px 8px; border-radius:10px; font-size:11px;">Aprovada</span>';
+}
+
+function canReviewExpenses(user) {
+  return !!user && (user.role === 'sede' || user.role === 'tesoureiro_setor');
+}
+
+// Despesas da semana que ainda dependem de aprovação do setor.
+function pendingExpensesInWeek(scopeFilter, week) {
+  const { start, end } = weekBounds(weekStartDate(week));
+  return Storage.getExpenses().filter(e => {
+    const t = new Date(e.date).getTime();
+    return t >= start.getTime() && t <= end.getTime() && scopeFilter(e) && !isExpenseApproved(e);
+  });
+}
+
+// Bloco compacto com as despesas pendentes e as ações de aprovação do setor.
+function pendingExpensesBlock(list) {
+  if (!list || !list.length) return '';
+  return `<div style="margin-top:6px; padding:6px 8px; background:#fff8e1; border-radius:8px;">
+    <div style="font-size:11px; color:#8a6d3b; font-weight:700;">${list.length} despesa(s) aguardando aprovação do setor</div>
+    ${list.map(e => `<div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:11px; margin-top:4px;">
+      <span>${esc(e.category)} — ${fmtMoney(e.value)}</span>
+      <button class="btn btn-primary" style="padding:2px 8px; font-size:10px;" onclick="reviewExpenseItem('${e.id}','approve')">Aprovar</button>
+      <button class="btn btn-outline" style="padding:2px 8px; font-size:10px; color:var(--error);" onclick="reviewExpenseItem('${e.id}','reject')">Rejeitar</button>
+    </div>`).join('')}
+  </div>`;
 }
 
 // Chave da semana (segunda) a partir de uma data vinda do servidor.
@@ -3655,16 +3713,32 @@ function renderExpenseList(expenses) {
     el.innerHTML = '<div style="color:var(--text-muted); font-size:13px; text-align:center; padding:8px;">Nenhuma despesa no período</div>';
     return;
   }
+  const reviewer = canReviewExpenses(currentUser);
+  const isCong = currentUser?.role === 'tesoureiro_congregacao';
   el.innerHTML = expenses.slice().sort((a, b) => new Date(b.date) - new Date(a.date)).map(e => {
     const sec = sectorsData.find(s => s.id === e.sectorId);
     const cong = sec?.congregations.find(c => c.id === e.congregationId);
     const local = cong ? `${String(sec.id).padStart(2,'0')}/${cong.code}` : (sec ? `Setor ${String(sec.id).padStart(2,'0')}` : '');
+    const state = expenseReviewState(e);
+    const needsReview = state === 'pending' || state === 'flagged' || state === 'rejected';
+    let reviewActions = '';
+    if (reviewer && needsReview) {
+      reviewActions = `<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
+        <button class="btn btn-primary" style="padding:4px 10px; font-size:11px;" onclick="reviewExpenseItem('${e.id}','approve')">Aprovar</button>
+        <button class="btn btn-outline" style="padding:4px 10px; font-size:11px; color:var(--error);" onclick="reviewExpenseItem('${e.id}','reject')">Rejeitar</button>
+      </div>`;
+    } else if (isCong && needsReview) {
+      reviewActions = `<div style="margin-top:6px; font-size:11px; color:var(--accent-dark); font-weight:600;">Aguardando aprovação do setor — você não pode aprovar as próprias contas.</div>`;
+    }
+    const note = e.reviewNote ? `<div class="list-item-sub" style="color:var(--text-muted);"><strong>Obs. do setor:</strong> ${esc(e.reviewNote)}</div>` : '';
     return `
-      <div class="list-item">
+      <div class="list-item" style="align-items:flex-start;">
         <div class="list-item-info">
-          <div class="list-item-title">${e.category}</div>
+          <div class="list-item-title">${e.category} ${expenseReviewBadge(e)}</div>
           <div class="list-item-sub">${e.description ? e.description + ' • ' : ''}${paymentLabel(expensePayment(e))} • ${fmtDate(new Date(e.date))}${local ? ' • ' + local : ''}</div>
+          ${note}
           ${e.comprovante ? `<button class="btn btn-ghost" style="padding:2px 8px; font-size:11px; color:var(--primary);" onclick="viewComprovante('${e.id}')">📎 Comprovante</button>` : ''}
+          ${reviewActions}
         </div>
         <span class="list-item-badge" style="background:var(--error); color:white;">${fmtMoney(e.value)}</span>
         <button class="btn btn-ghost" style="padding:8px; color:var(--error);" onclick="deleteExpenseItem('${e.id}')">✕</button>
@@ -3702,6 +3776,11 @@ $('btnAddExpense')?.addEventListener('click', async () => {
 
   let exp;
   let queued = false;
+  // Congregação lança como pendente; setor/sede já lançam aprovado.
+  const createdByReviewer = canReviewExpenses(currentUser);
+  const localReview = createdByReviewer
+    ? { status: 'approved', reviewStatus: 'approved' }
+    : { status: 'pending', reviewStatus: 'pending' };
   const expPayload = {
     date: new Date(dateVal + 'T12:00:00').toISOString(),
     category, description, value,
@@ -3728,6 +3807,7 @@ $('btnAddExpense')?.addEventListener('click', async () => {
       sectorId, congregationId,
       comprovante: currentComprovante,
       pending: true,
+      ...localReview,
       createdBy: currentUser.name,
       createdAt: new Date().toISOString(),
     };
@@ -3739,6 +3819,7 @@ $('btnAddExpense')?.addEventListener('click', async () => {
       payment: $('expPayment')?.value || 'dinheiro',
       sectorId, congregationId,
       comprovante: currentComprovante,
+      ...localReview,
       createdBy: currentUser.name,
       createdAt: new Date().toISOString(),
     };
@@ -3781,6 +3862,46 @@ function deleteExpenseItem(id) {
     renderWeeklyClose();
   });
 }
+
+// Aprovação/rejeição da despesa pelo setor (ou sede). A congregação nunca aprova
+// as próprias contas: apenas o setor responsável libera o fechamento da semana.
+async function reviewExpenseItem(id, action) {
+  if (!id) return;
+  if (!canReviewExpenses(currentUser)) {
+    return showToast('Apenas o tesoureiro de setor ou a sede aprovam despesas', 'error');
+  }
+  let note = '';
+  if (action === 'reject' || action === 'flag') {
+    note = promptJustification(action === 'reject' ? 'Motivo da rejeição da despesa:' : 'Motivo do sinal:');
+    if (!note) return showToast('Informe o motivo', 'error');
+  }
+  const stateMap = { approve: 'approved', reject: 'rejected', flag: 'flagged', pending: 'pending' };
+  const nextReview = stateMap[action] || 'approved';
+  if (HAS_FETCH_MODE()) {
+    try {
+      const out = await Api.put('/api/expenses/' + encodeURIComponent(id) + '/review', { action, note: note || null });
+      const mapped = mapExpense(out.expense);
+      const arr = Storage.getExpenses().filter(x => String(x.id) !== String(mapped.id));
+      arr.push(mapped);
+      Storage.set('adm_expenses', arr);
+    } catch (e) { return apiErrorToast(e); }
+  } else {
+    const arr = Storage.getExpenses().map(x => String(x.id) === String(id)
+      ? {
+          ...x,
+          status: action === 'approve' ? 'approved' : (action === 'reject' ? 'rejected' : x.status),
+          reviewStatus: nextReview,
+          reviewNote: note || '',
+        }
+      : x);
+    Storage.set('adm_expenses', arr);
+  }
+  showToast(action === 'approve' ? 'Despesa aprovada' : 'Despesa atualizada', 'success');
+  if ($('screenWeeklyClose')?.classList.contains('active')) renderWeeklyClose();
+  if ($('screenFinanceControl')?.classList.contains('active')) renderFinanceControl();
+  if ($('screenDashboard')?.classList.contains('active')) renderDashboard();
+}
+window.reviewExpenseItem = reviewExpenseItem;
 
 // Exportar fechamento semanal em Excel
 function exportWeeklyExcel() {
@@ -5743,8 +5864,18 @@ function renderWeeklyClosurePanel() {
     if (sums.exceeded) {
       html += `<div style="margin-top:10px; padding:8px; background:#fff5f5; border-radius:8px; font-size:13px; color:var(--error);">Despesas acima de 40% das receitas. É obrigatória a justificativa para fechar a semana.</div>`;
     }
+    const pendingExp = pendingExpensesInWeek(scopeCong(currentUser.sectorId, currentUser.congregationId), week);
     if (!cl) {
-      html += `<button class="btn btn-primary" style="width:100%; margin-top:12px;" onclick="closeCongregationWeek()">Fechar Semana da Congregação</button>`;
+      if (pendingExp.length) {
+        const pendingTotal = pendingExp.reduce((s, e) => s + Number(e.value || 0), 0);
+        html += `<div style="margin-top:10px; padding:8px; background:#fff8e1; border-radius:8px; font-size:13px; color:#8a6d3b;">
+          <strong>${pendingExp.length} despesa(s) aguardando aprovação do setor</strong> (${fmtMoney(pendingTotal)}).<br>
+          Você não pode aprovar as próprias contas. O fechamento será liberado após a aprovação do setor.
+        </div>`;
+        html += `<button class="btn btn-outline" style="width:100%; margin-top:12px;" disabled>Aguardando aprovação do setor (${pendingExp.length})</button>`;
+      } else {
+        html += `<button class="btn btn-primary" style="width:100%; margin-top:12px;" onclick="closeCongregationWeek()">Fechar Semana da Congregação</button>`;
+      }
     } else {
       html += `<div style="margin-top:12px; font-size:13px;">Status: ${statusBadge(cl.status)}<br>
         Fechada por <strong>${cl.closedBy}</strong> em ${new Date(cl.closedAt).toLocaleString('pt-BR')}</div>`;
@@ -5766,6 +5897,7 @@ function renderWeeklyClosurePanel() {
       const sums = weekSumsFor(scopeCong(sector.id, cong.id), week);
       const cl = getClosureFor('congregacao', sector.id, cong.id, week);
       const st = cl ? cl.status : 'open';
+      const pendingExp = pendingExpensesInWeek(scopeCong(sector.id, cong.id), week);
       if (st !== 'validated') { allValidated = false; pending++; }
       html += `
         <div class="list-item" style="align-items:flex-start;">
@@ -5773,8 +5905,9 @@ function renderWeeklyClosurePanel() {
             <div class="list-item-title">${cong.code} — ${cong.name}</div>
             <div class="list-item-sub">Rec. ${fmtMoney(sums.income)} • Desp. ${fmtMoney(sums.expense)} • ${Math.round(sums.ratio * 100)}% ${sums.exceeded ? '• <span style="color:var(--error); font-weight:700;">EXCEDEU 40%</span>' : ''}</div>
             ${cl && cl.justification ? `<div class="list-item-sub" style="color:var(--text-muted);"><strong>Just.:</strong> ${cl.justification}</div>` : ''}
+            ${pendingExpensesBlock(pendingExp)}
           </div>
-          <div style="text-align:right;">${statusBadge(st)}${!cl ? `<br><button class="btn btn-outline" style="margin-top:6px; padding:4px 10px; font-size:11px;" onclick="closeCongregationFor(${sector.id}, ${cong.id})">Fechar</button>` : ''}${cl && st === 'closed' ? `<br><button class="btn btn-primary" style="margin-top:6px; padding:6px 12px; font-size:12px;" onclick="validateCongregationClosure(${sector.id}, ${cong.id})">Validar</button>` : ''}${cl ? `<br><button class="btn btn-ghost" style="margin-top:6px; padding:4px 10px; font-size:11px;" onclick="reopenCongregationClosure(${sector.id}, ${cong.id})">Reabrir</button>` : ''}</div>
+          <div style="text-align:right;">${statusBadge(st)}${!cl ? `<br><button class="btn btn-outline" style="margin-top:6px; padding:4px 10px; font-size:11px;" ${pendingExp.length ? 'disabled title="Aprove as despesas pendentes antes de fechar"' : ''} onclick="closeCongregationFor(${sector.id}, ${cong.id})">Fechar</button>` : ''}${cl && st === 'closed' ? `<br><button class="btn btn-primary" style="margin-top:6px; padding:6px 12px; font-size:12px;" onclick="validateCongregationClosure(${sector.id}, ${cong.id})">Validar</button>` : ''}${cl ? `<br><button class="btn btn-ghost" style="margin-top:6px; padding:4px 10px; font-size:11px;" onclick="reopenCongregationClosure(${sector.id}, ${cong.id})">Reabrir</button>` : ''}</div>
         </div>`;
     });
 
@@ -5862,13 +5995,15 @@ function renderWeeklyClosurePanel() {
       const cs = weekSumsFor(scopeCong(sec.id, cong.id), week);
       const cl = getClosureFor('congregacao', sec.id, cong.id, week);
       const st = cl ? cl.status : 'open';
+      const pendingExp = pendingExpensesInWeek(scopeCong(sec.id, cong.id), week);
       html += `
         <div class="list-item" style="align-items:flex-start; padding-left:10px;">
           <div class="list-item-info">
             <div class="list-item-title" style="font-size:13px;">${cong.code} — ${cong.name}</div>
             <div class="list-item-sub">Rec. ${fmtMoney(cs.income)} • Desp. ${fmtMoney(cs.expense)} • ${Math.round(cs.ratio * 100)}%${cs.exceeded ? ' • <span style="color:var(--error); font-weight:700;">EXCEDEU 40%</span>' : ''}</div>
+            ${pendingExpensesBlock(pendingExp)}
           </div>
-          <div style="text-align:right;">${statusBadge(st)}${!cl ? `<br><button class="btn btn-outline" style="margin-top:6px; padding:4px 10px; font-size:11px;" onclick="closeCongregationFor(${sec.id}, ${cong.id})">Fechar</button>` : ''}${cl && st === 'closed' ? `<br><button class="btn btn-primary" style="margin-top:6px; padding:6px 12px; font-size:12px;" onclick="validateCongregationClosure(${sec.id}, ${cong.id})">Validar</button>` : ''}${cl ? `<br><button class="btn btn-ghost" style="margin-top:6px; padding:4px 10px; font-size:11px;" onclick="reopenCongregationClosure(${sec.id}, ${cong.id})">Reabrir</button>` : ''}</div>
+          <div style="text-align:right;">${statusBadge(st)}${!cl ? `<br><button class="btn btn-outline" style="margin-top:6px; padding:4px 10px; font-size:11px;" ${pendingExp.length ? 'disabled title="Aprove as despesas pendentes antes de fechar"' : ''} onclick="closeCongregationFor(${sec.id}, ${cong.id})">Fechar</button>` : ''}${cl && st === 'closed' ? `<br><button class="btn btn-primary" style="margin-top:6px; padding:6px 12px; font-size:12px;" onclick="validateCongregationClosure(${sec.id}, ${cong.id})">Validar</button>` : ''}${cl ? `<br><button class="btn btn-ghost" style="margin-top:6px; padding:4px 10px; font-size:11px;" onclick="reopenCongregationClosure(${sec.id}, ${cong.id})">Reabrir</button>` : ''}</div>
         </div>`;
     });
 
@@ -6461,7 +6596,8 @@ function renderPendingCongregationsForSector(week) {
     const cl = getClosureFor('congregacao', sector.id, cong.id, week);
     const status = cl ? cl.status : 'open';
     const sums = weekSumsFor(scopeCong(sector.id, cong.id), week);
-    return { cong, cl, status, sums };
+    const pendingExp = pendingExpensesInWeek(scopeCong(sector.id, cong.id), week);
+    return { cong, cl, status, sums, pendingExp };
   }).filter(x => x.status !== 'validated');
 
   $('pendingClosuresCount').textContent = items.length ? `(${items.length})` : '';
@@ -6471,19 +6607,20 @@ function renderPendingCongregationsForSector(week) {
     return;
   }
 
-  const rows = items.map(({ cong, cl, status, sums }) => {
+  const rows = items.map(({ cong, cl, status, sums, pendingExp }) => {
     const pct = Math.round((sums.ratio || 0) * 100);
     const money = (sums.income || sums.expense)
       ? `Rec. ${fmtMoney(sums.income)} • Desp. ${fmtMoney(sums.expense)} • ${pct}%`
       : 'Sem movimentos na semana';
     const action = status === 'open'
-      ? `<button type="button" class="btn btn-outline" style="padding:4px 10px; font-size:11px; white-space:nowrap;" onclick="closeCongregationForWeek(${sector.id}, ${cong.id}, '${wk}')">Fechar</button>`
+      ? `<button type="button" class="btn btn-outline" style="padding:4px 10px; font-size:11px; white-space:nowrap;" ${pendingExp.length ? 'disabled title="Aprove as despesas pendentes antes de fechar"' : ''} onclick="closeCongregationForWeek(${sector.id}, ${cong.id}, '${wk}')">Fechar</button>`
       : `<button type="button" class="btn btn-primary" style="padding:4px 10px; font-size:11px; white-space:nowrap;" onclick="validateCongregationClosureForWeek(${sector.id}, ${cong.id}, '${wk}')">Validar</button>`;
     return `<div class="list-item" style="align-items:flex-start;">
       <div class="list-item-info">
         <div class="list-item-title" style="font-size:13px;">${esc(cong.code)} — ${esc(cong.name)}</div>
         <div class="list-item-sub">${money}${sums.exceeded ? ' • <span style="color:var(--error); font-weight:700;">EXCEDEU 40%</span>' : ''}</div>
         ${cl && cl.justification ? `<div class="list-item-sub" style="color:var(--text-muted);"><strong>Just.:</strong> ${esc(cl.justification)}</div>` : ''}
+        ${pendingExpensesBlock(pendingExp)}
       </div>
       <div style="text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
         <div>${statusBadge(status)}</div>
@@ -6540,6 +6677,11 @@ async function closeCongregationWeek() {
   const existing = getClosureFor('congregacao', currentUser.sectorId, currentUser.congregationId, week);
   if (existing) return showToast('Esta semana já foi fechada.', 'warning');
 
+  const pendingExp = pendingExpensesInWeek(scopeCong(currentUser.sectorId, currentUser.congregationId), week);
+  if (pendingExp.length) {
+    return showToast(`Existem ${pendingExp.length} despesa(s) aguardando aprovação do setor. O fechamento será liberado após a aprovação.`, 'error');
+  }
+
   const sums = weekSumsFor(scopeCong(currentUser.sectorId, currentUser.congregationId), week);
   let just = ($('weekJustification')?.value || '').trim();
   if (sums.exceeded && !just) return showToast('Justifique o excedente antes de fechar a semana', 'error');
@@ -6583,6 +6725,11 @@ async function closeCongregationFor(sectorId, congregationId, weekRef) {
   const wk = resolveWeekRef(weekRef);
   const existing = getClosureFor('congregacao', sectorId, congregationId, wk);
   if (existing) return showToast('Esta semana já foi fechada.', 'warning');
+
+  const pendingExp = pendingExpensesInWeek(scopeCong(sectorId, congregationId), wk);
+  if (pendingExp.length && currentUser?.role !== 'sede') {
+    return showToast(`Existem ${pendingExp.length} despesa(s) aguardando aprovação do setor. Aprove antes de fechar a semana.`, 'error');
+  }
 
   const sums = weekSumsFor(scopeCong(sectorId, congregationId), wk);
   let justification = ($('weekJustification')?.value || '').trim();
@@ -7115,9 +7262,13 @@ function renderFinancePendingList(items) {
     var note = it.reviewNote ? '<div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Obs: ' + esc(it.reviewNote) + '</div>' : '';
     var actions = '';
     if (it.kind === 'expense') {
-      actions = '<button type="button" class="btn btn-primary" style="padding:6px 10px; font-size:12px;" onclick="reviewFinanceItem(\'expense\',\'' + esc(it.id) + '\',\'approve\')">Aprovar</button> '
-        + '<button type="button" class="btn btn-outline" style="padding:6px 10px; font-size:12px;" onclick="reviewFinanceItem(\'expense\',\'' + esc(it.id) + '\',\'flag\')">Sinalizar</button> '
-        + '<button type="button" class="btn btn-outline" style="padding:6px 10px; font-size:12px; color:var(--error);" onclick="reviewFinanceItem(\'expense\',\'' + esc(it.id) + '\',\'reject\')">Rejeitar</button>';
+      if (currentUser && currentUser.role === 'tesoureiro_congregacao') {
+        actions = '<span style="font-size:12px; color:var(--accent-dark); font-weight:600;">Aguardando aprovação do setor — a congregação não aprova as próprias contas.</span>';
+      } else {
+        actions = '<button type="button" class="btn btn-primary" style="padding:6px 10px; font-size:12px;" onclick="reviewFinanceItem(\'expense\',\'' + esc(it.id) + '\',\'approve\')">Aprovar</button> '
+          + '<button type="button" class="btn btn-outline" style="padding:6px 10px; font-size:12px;" onclick="reviewFinanceItem(\'expense\',\'' + esc(it.id) + '\',\'flag\')">Sinalizar</button> '
+          + '<button type="button" class="btn btn-outline" style="padding:6px 10px; font-size:12px; color:var(--error);" onclick="reviewFinanceItem(\'expense\',\'' + esc(it.id) + '\',\'reject\')">Rejeitar</button>';
+      }
     } else if (it.kind === 'payable') {
       actions = '<button type="button" class="btn btn-primary" style="padding:6px 10px; font-size:12px;" onclick="payableAction(\'' + esc(it.id) + '\',\'approve\')">Aprovar</button> '
         + '<button type="button" class="btn btn-outline" style="padding:6px 10px; font-size:12px; color:var(--error);" onclick="payableAction(\'' + esc(it.id) + '\',\'cancel\')">Cancelar</button>';
@@ -7285,6 +7436,9 @@ async function submitPayablePayment(){
 
 async function reviewFinanceItem(kind, id, action) {
   if (!id) return;
+  if (kind === 'expense' && !canReviewExpenses(currentUser)) {
+    return showToast('Apenas o tesoureiro de setor ou a sede aprovam despesas', 'error');
+  }
   var note = '';
   try {
     var v = window.prompt('Observação (opcional):');
@@ -7293,8 +7447,15 @@ async function reviewFinanceItem(kind, id, action) {
   } catch(e) { note = ''; }
   var path = kind === 'expense' ? ('/api/expenses/' + encodeURIComponent(id) + '/review') : ('/api/receipts/' + encodeURIComponent(id) + '/review');
   try {
-    await Api.put(path, { action: action, note: note || null });
+    var out = await Api.put(path, { action: action, note: note || null });
+    if (kind === 'expense' && out && out.expense) {
+      var mapped = mapExpense(out.expense);
+      var arr = Storage.getExpenses().filter(function(x){ return String(x.id) !== String(mapped.id); });
+      arr.push(mapped);
+      Storage.set('adm_expenses', arr);
+    }
     showToast('Validação registrada', 'success');
+    if (kind === 'expense' && $('screenWeeklyClose')?.classList.contains('active')) renderWeeklyClose();
     renderFinanceControl();
   } catch (e) {
     console.error('[finance review]', e);
