@@ -88,7 +88,7 @@ router.get('/', async (req, res, next) => {
     const weekStart = resolveWeekStart(req.query.week);
     const where = { weekStart };
     if (req.user.role === 'tesoureiro_setor') where.sectorId = req.user.sectorId;
-    else if (req.user.role === 'tesoureiro_congregacao') where.congregationId = req.user.congregationId;
+    else if (req.user.role === 'tesoureiro_congregacao' || req.user.role === 'coletor') where.congregationId = req.user.congregationId;
     else if (req.user.role !== 'sede') throw httpError(403, 'Sem acesso aos fechamentos');
     const closures = await prisma.weekClosure.findMany({ where });
     const info = isoWeekInfo(weekStart);

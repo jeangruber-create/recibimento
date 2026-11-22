@@ -4,6 +4,7 @@ const prisma = require('../prisma');
 const { authRequired } = require('../middleware/auth');
 const { httpError } = require('../middleware/error');
 const { receiptWhere, resolveReceiptScope, canWriteReceipt, memberSelfReceipt } = require('../lib/scope');
+const { resolveWeekStart } = require('../lib/week');
 const { receipt: serializeReceipt } = require('../lib/serialize');
 const { logAudit } = require('../lib/audit');
 
@@ -89,6 +90,16 @@ router.post('/', async (req, res, next) => {
   try {
     const data = createSchema.parse(req.body);
     const scope = await resolveReceiptScope(prisma, req.user, data);
+
+    // Coletor e tesouraria da congregação só lançam enquanto a semana está aberta.
+    // Depois do fechamento, o servidor também recusa (não depende só da tela).
+    if (req.user.role === 'coletor' || req.user.role === 'tesoureiro_congregacao') {
+      const weekStart = resolveWeekStart(new Date());
+      const closed = await prisma.weekClosure.findFirst({
+        where: { scope: 'congregacao', sectorId: scope.sectorId, congregationId: scope.congregationId, weekStart },
+      });
+      if (closed) throw httpError(409, 'O movimento desta semana já foi fechado pela congregação.');
+    }
 
     // Membro: o recibo é sempre dele e sempre PIX (dízimo/oferta de casa).
     let personName = data.person.name;

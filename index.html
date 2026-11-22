@@ -97,6 +97,48 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
   #quickNav .qnav-danger { display: none; }
 }
 
+/* ===== Módulo por perfil: cabeçalho, ações e passo a passo ===== */
+.module-hero {
+  border-radius: var(--radius);
+  padding: 20px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--primary), var(--primary-light));
+  box-shadow: var(--shadow);
+  margin-bottom: 16px;
+}
+.module-hero .module-kicker { font-size: 11px; text-transform: uppercase; letter-spacing: .09em; opacity: .85; font-weight: 700; }
+.module-hero h2 { font-size: 22px; margin: 6px 0 8px; line-height: 1.2; }
+.module-hero p { font-size: 14px; opacity: .95; }
+.module-hero .module-scope { margin-top: 12px; font-size: 12px; opacity: .9; }
+.module-action {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  padding: 14px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: #fff; color: var(--text); cursor: pointer; font-size: 15px;
+  transition: transform .1s, box-shadow .1s;
+}
+.module-action:active { transform: scale(.99); }
+.module-action.primary { border-color: var(--primary); background: var(--primary); color: #fff; }
+.module-action.primary .module-action-desc { color: rgba(255,255,255,.88); }
+.module-action-icon {
+  width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center;
+  justify-content: center; background: #eef3f8; color: var(--primary); flex: 0 0 auto; font-size: 19px;
+}
+.module-action.primary .module-action-icon { background: rgba(255,255,255,.18); color: #fff; }
+.module-action-title { font-weight: 700; display: block; }
+.module-action-desc { font-size: 12px; color: var(--text-muted); margin-top: 2px; display: block; }
+.module-arrow { font-size: 20px; opacity: .55; }
+.module-steps { display: grid; gap: 10px; }
+.module-step { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; }
+.module-step-num {
+  width: 24px; height: 24px; border-radius: 50%; background: var(--primary); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex: 0 0 auto;
+}
+.module-kpi { background: #fafafa; border-radius: var(--radius-sm); padding: 14px; }
+.module-kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
+.module-kpi-value { font-size: 20px; font-weight: 700; color: var(--primary); margin-top: 4px; }
+.module-pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.module-note { font-size: 13px; color: var(--text-muted); margin-top: 10px; line-height: 1.5; }
+
 /* Tablet: coluna central confortável (formulários e leitura) */
 @media (min-width: 720px) {
   .screen { align-items: center; padding: calc(var(--topbar-h) + 20px) 24px calc(var(--bottom-h) + 28px); }
@@ -308,21 +350,8 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
       <button class="btn btn-ghost" id="btnLogout" style="display:none;">Sair</button>
     </div>
   </header>
-  <!-- Navegação alternativa (fallback mobile - caso o rodapé seja interceptado pelo navegador) -->
-  <nav id="quickNav" class="quick-nav" style="display:none;" aria-label="Navegação rápida">
-    <button type="button" class="qnav-btn" onclick="startCollection()">Receber</button>
-    <button type="button" class="qnav-btn" onclick="navigate('screenEntries')">Lançar</button>
-    <button type="button" class="qnav-btn" id="qnavDashboard" style="display:none;" onclick="navigate('screenDashboard')">Painel</button>
-    <button type="button" class="qnav-btn" id="qnavWeekly" style="display:none;" onclick="navigate('screenWeeklyClose')">Semanal</button>
-    <button type="button" class="qnav-btn" id="qnavSede" style="display:none;" onclick="navigate('screenSede')">Sede</button>
-    <button type="button" class="qnav-btn" id="qnavAdmin" style="display:none;" onclick="navigate('screenAdmin')">Gerir</button>
-    <button type="button" class="qnav-btn" id="qnavFinance" style="display:none;" onclick="navigate('screenFinanceControl')">Finanças</button>
-    <button type="button" class="qnav-btn" id="qnavConsultas" style="display:none;" onclick="navigate('screenConsultas')">Consultas</button>
-    <button type="button" class="qnav-btn" id="qnavStructure" style="display:none;" onclick="navigate('screenStructure')">Setores e Sede</button>
-    <button type="button" class="qnav-btn" id="qnavReceipt" style="display:none;" onclick="navigate('screenReceipt')">Recibo</button>
-    <button type="button" class="qnav-btn" onclick="navigate('screenCloseService')">Fechar</button>
-    <button type="button" class="qnav-btn qnav-danger" onclick="logout()">Sair</button>
-  </nav>
+  <!-- Navegação rápida: os botões são montados por perfil em renderQuickNav() -->
+  <nav id="quickNav" class="quick-nav" style="display:none;" aria-label="Navegação rápida"></nav>
 
 
   <!-- SCREEN 1: LOGIN -->
@@ -357,6 +386,34 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
         <span style="color:#8E24AA; font-weight:600;">membro@adm.org.br</span> — Membro (portal + QR)
       </p>
     </div>
+  </section>
+
+  <!-- SCREEN: MEU MÓDULO (ponto de partida simples de cada perfil) -->
+  <section class="screen" id="screenModule" data-title="Meu módulo">
+    <div id="moduleHero"></div>
+    <div id="moduleStatus"></div>
+    <div class="card" id="moduleActionsCard">
+      <h3 class="card-title">O que você faz aqui</h3>
+      <div id="moduleActions" style="display:flex; flex-direction:column; gap:10px;"></div>
+    </div>
+    <div class="card" id="moduleHowCard">
+      <h3 class="card-title">Como funciona</h3>
+      <div id="moduleHow" class="module-steps"></div>
+    </div>
+  </section>
+
+  <!-- SCREEN: MOVIMENTO DO DIA (coletor e congregação) -->
+  <section class="screen" id="screenDay" data-title="Movimento do dia">
+    <div id="dayHero"></div>
+    <div class="card">
+      <div class="card-title-row">
+        <h3 class="card-title">Lançamentos de hoje</h3>
+        <button type="button" class="btn btn-ghost" onclick="renderDayMovement()" style="font-size:12px; padding:6px 12px;">Atualizar</button>
+      </div>
+      <div id="dayTotals" class="confirm-grid" style="margin-bottom:12px;"></div>
+      <div id="dayList"></div>
+    </div>
+    <div id="dayClosureCard"></div>
   </section>
 
   <!-- SCREEN: AUTOCADASTRO DO MEMBRO -->
@@ -461,9 +518,14 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
     <div style="background:var(--primary); color:white; border-radius:var(--radius-sm); padding:10px 14px; display:flex; align-items:center; gap:8px; margin-bottom:14px; font-size:13px;" id="receiptContextBar">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
       <span id="receiptContext">—</span>
-      <span id="lockBadge" style="display:none; background:var(--accent); color:var(--primary); padding:2px 8px; border-radius:10px; font-weight:700; font-size:11px; margin-left:auto;">🔒 TRAVADO</span>
+      <span id="lockBadge" style="display:none; background:var(--accent); color:var(--primary); padding:2px 8px; border-radius:10px; font-weight:700; font-size:11px; margin-left:auto;">CONGREGAÇÃO FIXA</span>
     </div>
-    <div class="card">
+    <div class="card" id="receiptLockedNotice" style="display:none; border-left:4px solid var(--error);">
+      <h3 class="card-title" style="color:var(--error);">Movimento fechado pela congregação</h3>
+      <p style="font-size:14px; color:var(--text);">Não é possível lançar novos recebimentos nesta semana. Você ainda pode consultar tudo o que foi registrado hoje.</p>
+      <button type="button" class="btn btn-outline" style="margin-top:12px;" onclick="navigate('screenDay')">Ver movimento do dia</button>
+    </div>
+    <div class="card" id="receiptEntryCard">
       <h3 class="card-title">Novo Recebimento</h3>
       <div style="display:flex; flex-direction:column; gap:12px;">
         <button class="btn btn-primary btn-lg voice-btn" id="btnVoice">
@@ -649,7 +711,7 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
       <button class="btn btn-primary" onclick="printReceipt()">Imprimir / Salvar PDF</button>
     </div>
     <button class="btn btn-success" id="btnThankWhats" style="width:100%; margin-top:12px; display:none;" onclick="thankByWhatsApp()">Agradecer por WhatsApp</button>
-    <button class="btn btn-ghost" style="width:100%; margin-top:12px;" onclick="navigate('screenCloseService')">Fechar Culto</button>
+    <button class="btn btn-ghost" id="btnCloseServiceFromReceipt" style="width:100%; margin-top:12px;" onclick="navigate('screenCloseService')">Fechar Culto</button>
   </section>
 
   <!-- SCREEN 7: FECHAMENTO DO CULTO -->
@@ -1487,7 +1549,7 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
   <div class="toast" id="toast"></div>
 </div>
 
-<script src="app.js?v=32"></script>
+<script src="app.js?v=33"></script>
 
 
 <script src="mbw.js?v=12"></script>

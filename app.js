@@ -12,8 +12,8 @@ function showVersionBadge() {
 }
 
 // ============ VERSAO DO SISTEMA ============
-const APP_VERSION = '2026-11-22-v24';
-const APP_BUILD = 'mobile-quicknav-fix';
+const APP_VERSION = '2026-11-22-v25';
+const APP_BUILD = 'role-modules-simplified';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
@@ -52,10 +52,10 @@ const ROLE_LABELS = {
   membro: 'Membro'
 };
 const ROLE_DESC = {
-  sede: 'Acesso geral. Único que cadastra setores, congregações e todos os perfis.',
-  tesoureiro_setor: 'Vê os dados das congregações do seu setor. Cadastra tesoureiro de congregação.',
-  tesoureiro_congregacao: 'Vê os dados da sua congregação. Cadastra coletores locais.',
-  coletor: 'Coleta na sua congregação (travada). Pode ler QR do membro.',
+  sede: 'Recebe os setores, confere valores e comprovantes e acompanha o financeiro geral.',
+  tesoureiro_setor: 'Aprova despesas e valida os fechamentos das congregações do seu setor.',
+  tesoureiro_congregacao: 'Registra recebimentos, lança despesas e fecha a semana da congregação.',
+  coletor: 'Somente registra os recebimentos do culto e consulta o movimento do dia.',
   membro: 'Vê seus dízimos e ofertas e possui QR code único.'
 };
 const ROLE_CREATES = {
@@ -64,6 +64,84 @@ const ROLE_CREATES = {
   tesoureiro_congregacao: ['coletor', 'membro'],
   coletor: [],
   membro: []
+};
+
+// ============ MÓDULO SIMPLIFICADO POR PERFIL ============
+// Cada perfil vê uma tela inicial com o propósito do seu módulo e apenas os
+// botões necessários para a sua função. A linguagem é a mais direta possível.
+const ROLE_MODULE = {
+  coletor: {
+    label: 'Coletor',
+    title: 'Registrar o culto de hoje',
+    purpose: 'Você registra os dízimos e ofertas do culto. O fechamento do movimento é feito pela tesouraria da congregação.',
+    color: '#2E7D32',
+    actions: [
+      { icon: '➕', label: 'Novo recebimento', desc: 'Registrar um dízimo ou oferta', screen: 'screenNewReceipt', handler: 'startCollection', primary: true },
+      { icon: '📋', label: 'Movimento do dia', desc: 'Ver o que você registrou hoje', screen: 'screenDay' },
+    ],
+    steps: [
+      'Toque em "Novo recebimento".',
+      'Dite os dados ou preencha manualmente.',
+      'Confirme a pessoa e o valor.',
+      'No fim do culto, a congregação fecha o movimento.',
+    ],
+  },
+  tesoureiro_congregacao: {
+    label: 'Tesouraria da Congregação',
+    title: 'Cuidar do movimento da congregação',
+    purpose: 'Registre recebimentos, acompanhe o dia, lance despesas e feche a semana. As despesas precisam da aprovação do setor.',
+    color: '#1B3A5C',
+    actions: [
+      { icon: '➕', label: 'Novo recebimento', desc: 'Registrar um dízimo ou oferta', screen: 'screenNewReceipt', handler: 'startCollection', primary: true },
+      { icon: '📋', label: 'Movimento do dia', desc: 'Ver todos os lançamentos de hoje', screen: 'screenDay' },
+      { icon: '📅', label: 'Fechar a semana', desc: 'Fechar o movimento e enviar ao setor', screen: 'screenWeeklyClose' },
+      { icon: '💸', label: 'Despesas e contas', desc: 'Lançar despesas e ver o que está a pagar', screen: 'screenFinanceControl' },
+      { icon: '👥', label: 'Cadastros da congregação', desc: 'Cadastrar coletores e membros', screen: 'screenAdmin' },
+    ],
+    steps: [
+      'Registre os recebimentos do culto.',
+      'Lance as despesas da semana com comprovante.',
+      'Aguarde o setor aprovar as despesas pendentes.',
+      'Feche a semana e envie ao setor.',
+    ],
+  },
+  tesoureiro_setor: {
+    label: 'Tesouraria do Setor',
+    title: 'Acompanhar e validar as congregações',
+    purpose: 'Veja o que cada congregação do seu setor registrou, aprove despesas e valide os fechamentos da semana.',
+    color: '#B8923A',
+    actions: [
+      { icon: '📅', label: 'Pendências da semana', desc: 'Congregações em aberto, fechadas e validadas', screen: 'screenWeeklyClose', primary: true },
+      { icon: '✅', label: 'Aprovar despesas', desc: 'Revisar despesas aguardando aprovação', screen: 'screenFinanceControl' },
+      { icon: '📊', label: 'Painel do setor', desc: 'Ver totais, gráficos e movimentos', screen: 'screenDashboard' },
+      { icon: '👥', label: 'Congregações e cadastros', desc: 'Cadastrar congregações, coletores e membros', screen: 'screenAdmin' },
+    ],
+    steps: [
+      'Aprove as despesas pendentes das congregações.',
+      'Acompanhe quem ainda não fechou a semana.',
+      'Valide os fechamentos enviados.',
+      'Feche a semana do setor quando todas estiverem validadas.',
+    ],
+  },
+  sede: {
+    label: 'Tesouraria Sede',
+    title: 'Receber e conferir os setores',
+    purpose: 'Receba os setores da semana, confira valores e comprovantes, aprove prestações e acompanhe o financeiro geral.',
+    color: '#1B3A5C',
+    actions: [
+      { icon: '🏦', label: 'Receber setores', desc: 'Conferir e receber o fechamento de cada setor', screen: 'screenSede', primary: true },
+      { icon: '📅', label: 'Visão geral da semana', desc: 'Acompanhar congregações e setores', screen: 'screenWeeklyClose' },
+      { icon: '💰', label: 'Controle financeiro', desc: 'Entradas, saídas, saldo e contas a pagar', screen: 'screenFinanceControl' },
+      { icon: '⚙️', label: 'Gestão e cadastros', desc: 'Setores, congregações, usuários e membros', screen: 'screenAdmin' },
+      { icon: '📊', label: 'Painel geral', desc: 'Indicadores e movimentos consolidados', screen: 'screenDashboard' },
+    ],
+    steps: [
+      'Abra "Receber setores" e escolha o setor.',
+      'Confira os valores e os comprovantes.',
+      'Aprove a prestação e confirme o recebimento.',
+      'Devolva ao setor quando houver divergência.',
+    ],
+  },
 };
 // Perfis que precisam de setor/congregação vinculados
 const ROLE_NEEDS_SECTOR = ['tesoureiro_setor', 'tesoureiro_congregacao', 'coletor', 'membro'];
@@ -163,8 +241,6 @@ function updateNav(activeScreen) {
   // Show receipt nav only after first receipt (elementos podem não existir em layouts novos)
   const navReceipt = $('navReceipt');
   if (navReceipt) navReceipt.style.display = serviceReceipts.length > 0 ? 'flex' : 'none';
-  const qnavReceipt = $('qnavReceipt');
-  if (qnavReceipt) qnavReceipt.style.display = serviceReceipts.length > 0 ? 'inline-block' : 'none';
 }
 
 // ============ STORAGE (localStorage) ============
@@ -702,7 +778,6 @@ async function afterLogin(user) {
   updateSyncBadge();
   // Rodapé/bottombar removido (atalhos ficavam no menu superior/quickNav)
   var _bb = $('bottombar'); if (_bb) _bb.style.display = 'none';
-  if($('quickNav')) $('quickNav').style.display = user.role === 'membro' ? 'none' : 'flex';
   updateAdminNav();
 
   try { await syncFinancialData(); }
@@ -710,25 +785,29 @@ async function afterLogin(user) {
   try { await refreshSectors(); } catch (e) { /* setores são opcionais por perfil */ }
   if (canManage(user)) { try { await refreshUsers(); } catch (e) { /* idem */ } }
   try { await refreshAlerts(); } catch (e) { /* alertas são opcionais por perfil */ }
+  // Status de fechamento da semana precisa estar atualizado para liberar/bloquear a coleta.
+  try { await refreshWeekClosures(new Date()); } catch (e) { /* opcional sem servidor */ }
 
   if (user.role === 'membro') {
     showToast(`Bem-vindo, ${user.name}!`, 'success');
     navigate('screenMember');
     renderMemberPortal();
-  } else if (user.role === 'tesoureiro_congregacao' || user.role === 'coletor') {
+    return;
+  }
+
+  if (user.role === 'coletor' || user.role === 'tesoureiro_congregacao') {
     selectedSector = sectorsData.find(s => s.id === user.sectorId);
     selectedCongregation = selectedSector?.congregations.find(c => c.id === user.congregationId);
     showToast(`Bem-vindo, ${user.name}! Cong ${selectedCongregation?.code || ''}`, 'success');
-    navigate('screenNewReceipt');
   } else if (user.role === 'tesoureiro_setor') {
     selectedSector = sectorsData.find(s => s.id === user.sectorId);
     selectedCongregation = null;
     showToast(`Bem-vindo, ${user.name}! ${selectedSector?.name || ''}`, 'success');
-    navigate('screenDashboard');
   } else {
     showToast(`Bem-vindo, ${user.name}!`, 'success');
-    navigate('screenDashboard');
   }
+  // Todos os perfis de tesouraria começam no "Meu módulo", com o propósito e os botões do perfil.
+  navigate('screenModule');
 }
 
 // ============ SPEECH SERVICE (Interface pronta para IA) ============
@@ -1699,7 +1778,6 @@ async function logout() {
   $('btnLogout').style.display = 'none';
   if ($('syncBadge')) $('syncBadge').style.display = 'none';
   var _bb = $('bottombar'); if (_bb) _bb.style.display = 'none';
-  if($('quickNav')) $('quickNav').style.display = 'none';
   updateAdminNav();
   navigate('screenLogin');
 }
@@ -1814,9 +1892,15 @@ function renderReceiptContext() {
   const cong = selectedCongregation;
   if (sec && cong) {
     $('receiptContext').textContent = `${String(sec.id).padStart(2,'0')} — ${sec.name} • ${cong.code} — ${cong.name}`;
-    const locked = ['coletor', 'tesoureiro_congregacao'].includes(currentUser?.role);
-    $('lockBadge').style.display = locked ? 'inline-block' : 'none';
   }
+  // Coletor e congregação não escolhem outra instância: o vínculo é fixo.
+  const fixed = ['coletor', 'tesoureiro_congregacao'].includes(currentUser?.role);
+  if ($('lockBadge')) $('lockBadge').style.display = fixed ? 'inline-block' : 'none';
+
+  // Depois do fechamento da semana/culto, a tela vira somente consulta.
+  const locked = isCollectionLocked();
+  if ($('receiptLockedNotice')) $('receiptLockedNotice').style.display = locked ? 'block' : 'none';
+  if ($('receiptEntryCard')) $('receiptEntryCard').style.display = locked ? 'none' : 'block';
 }
 
 function renderCongregationScreen() {
@@ -2200,6 +2284,10 @@ function renderConfirm() {
 }
 
 $('btnRegister').onclick = async () => {
+  if (isCollectionLocked()) {
+    showToast('O movimento desta semana já foi fechado pela congregação.', 'warning');
+    return navigate('screenDay');
+  }
   const person = currentReceipt.person || { name: currentReceipt.name };
   const payload = {
     person: { name: person.name, memberCode: person.memberCode ?? null },
@@ -2338,21 +2426,293 @@ function printReceipt() {
 function getHomeScreen() {
   if (!currentUser) return 'screenLogin';
   if (currentUser.role === 'membro') return 'screenMember';
-  if (currentUser.role === 'coletor' || currentUser.role === 'tesoureiro_congregacao') return 'screenNewReceipt';
-  return 'screenDashboard'; // sede e tesoureiro de setor: abrem no Painel
+  return 'screenModule';
 }
 
 function goHome() {
   navigate(getHomeScreen());
 }
 
-// Inicia a coleta: se o setor/congregação ainda não foi escolhido, abre a seleção
+// Inicia a coleta: se o setor/congregação ainda não foi escolhido, abre a seleção.
+// Depois do fechamento da semana pela congregação, a coleta fica bloqueada.
 function startCollection() {
+  if (isCollectionLocked()) {
+    showToast('O movimento desta semana já foi fechado pela congregação.', 'warning');
+    return navigate('screenDay');
+  }
   if (!selectedSector || !selectedCongregation) return navigate('screenCongregation');
   navigate('screenNewReceipt');
 }
 
+// Fechamento da congregação para a semana corrente (vindo do servidor).
+function currentCongregationClosure() {
+  const u = currentUser;
+  if (!u || !u.sectorId || !u.congregationId) return null;
+  return getClosureFor('congregacao', u.sectorId, u.congregationId, new Date());
+}
+
+// Coleta bloqueada depois que a congregação fecha o movimento da semana
+// (ou registra o fechamento do culto no mesmo aparelho).
+function isCollectionLocked() {
+  const u = currentUser;
+  if (!u) return false;
+  if (u.role !== 'coletor' && u.role !== 'tesoureiro_congregacao') return false;
+  if (currentCongregationClosure()) return true;
+  const today = dateKey(new Date());
+  return Storage.getClosures().some(c =>
+    c.congregationId === u.congregationId && dateKey(c.date) === today
+  );
+}
+
+// Recebimentos de hoje no escopo do perfil (coletor vê os próprios).
+function todayReceipts() {
+  const start = new Date(); start.setHours(0, 0, 0, 0);
+  const end = new Date(); end.setHours(23, 59, 59, 999);
+  return confirmedOnly(getScopedReceipts()).filter(r => {
+    const t = new Date(r.date).getTime();
+    return t >= start.getTime() && t <= end.getTime();
+  }).sort((a, b) => new Date(b.date) - new Date(a.date));
+}
+
+function moduleScopeLabel(u) {
+  if (!u) return '';
+  if (u.role === 'sede') return 'Todos os setores';
+  const sec = sectorsData.find(s => s.id === u.sectorId);
+  const cong = sec?.congregations.find(c => c.id === u.congregationId);
+  if (sec && cong) return `${sec.name} • ${cong.name}`;
+  if (sec) return sec.name;
+  return '';
+}
+
+// Navegação rápida montada por perfil: só aparece o que o usuário realmente usa.
+function renderQuickNav() {
+  const q = $('quickNav');
+  if (!q) return;
+  const u = currentUser;
+  if (!u || u.role === 'membro') { q.style.display = 'none'; q.innerHTML = ''; return; }
+
+  const items = [{ label: 'Início', screen: 'screenModule', id: 'qnavModule' }];
+  if (u.role === 'coletor') {
+    items.push({ label: 'Receber', screen: 'screenNewReceipt', id: 'qnavNewReceipt', handler: 'startCollection' });
+    items.push({ label: 'Meu dia', screen: 'screenDay', id: 'qnavDay' });
+  } else if (u.role === 'tesoureiro_congregacao') {
+    items.push({ label: 'Receber', screen: 'screenNewReceipt', id: 'qnavNewReceipt', handler: 'startCollection' });
+    items.push({ label: 'Meu dia', screen: 'screenDay', id: 'qnavDay' });
+    items.push({ label: 'Fechar semana', screen: 'screenWeeklyClose', id: 'qnavWeekly' });
+    items.push({ label: 'Despesas', screen: 'screenFinanceControl', id: 'qnavFinance' });
+    items.push({ label: 'Cadastros', screen: 'screenAdmin', id: 'qnavAdmin' });
+  } else if (u.role === 'tesoureiro_setor') {
+    items.push({ label: 'Pendências', screen: 'screenWeeklyClose', id: 'qnavWeekly' });
+    items.push({ label: 'Despesas', screen: 'screenFinanceControl', id: 'qnavFinance' });
+    items.push({ label: 'Painel', screen: 'screenDashboard', id: 'qnavDashboard' });
+    items.push({ label: 'Congregações', screen: 'screenAdmin', id: 'qnavAdmin' });
+  } else if (u.role === 'sede') {
+    items.push({ label: 'Receber setores', screen: 'screenSede', id: 'qnavSede' });
+    items.push({ label: 'Semana', screen: 'screenWeeklyClose', id: 'qnavWeekly' });
+    items.push({ label: 'Finanças', screen: 'screenFinanceControl', id: 'qnavFinance' });
+    items.push({ label: 'Painel', screen: 'screenDashboard', id: 'qnavDashboard' });
+    items.push({ label: 'Gestão', screen: 'screenAdmin', id: 'qnavAdmin' });
+  }
+
+  q.innerHTML = items.map(it => {
+    const click = it.handler ? `${it.handler}()` : `navigate('${it.screen}')`;
+    return `<button type="button" class="qnav-btn" id="${it.id}" onclick="${click}">${esc(it.label)}</button>`;
+  }).join('') + `<button type="button" class="qnav-btn qnav-danger" onclick="logout()">Sair</button>`;
+  q.style.display = 'flex';
+}
+
+// Tela inicial do módulo: propósito + status + ações grandes e diretas.
+async function renderModuleHome() {
+  const u = currentUser;
+  const hero = $('moduleHero');
+  if (!u || !hero) return;
+  const cfg = ROLE_MODULE[u.role];
+  if (!cfg) { navigate('screenLogin'); return; }
+
+  const scope = moduleScopeLabel(u);
+  hero.innerHTML = `<div class="module-hero" style="background:linear-gradient(135deg, ${cfg.color || 'var(--primary)'}, var(--primary-light));">
+    <div class="module-kicker">${esc(cfg.label)}</div>
+    <h2>${esc(cfg.title)}</h2>
+    <p>${esc(cfg.purpose)}</p>
+    <div class="module-scope">${esc(u.name || '')}${scope ? ' • ' + esc(scope) : ''}</div>
+  </div>`;
+
+  if ($('moduleActions')) {
+    $('moduleActions').innerHTML = (cfg.actions || []).map(a => {
+      const click = a.handler ? `${a.handler}()` : `navigate('${a.screen}')`;
+      return `
+      <button type="button" class="module-action ${a.primary ? 'primary' : ''}" onclick="${click}">
+        <span class="module-action-icon">${a.icon || '•'}</span>
+        <span style="flex:1;">
+          <span class="module-action-title">${esc(a.label)}</span>
+          <span class="module-action-desc">${esc(a.desc)}</span>
+        </span>
+        <span class="module-arrow">›</span>
+      </button>`;
+    }).join('');
+  }
+
+  if ($('moduleHow')) {
+    $('moduleHow').innerHTML = (cfg.steps || []).map((s, i) => `
+      <div class="module-step"><span class="module-step-num">${i + 1}</span><span>${esc(s)}</span></div>`).join('');
+  }
+
+  await renderModuleStatus(u);
+}
+
+async function renderModuleStatus(u) {
+  const box = $('moduleStatus');
+  if (!box) return;
+
+  if (u.role === 'coletor' || u.role === 'tesoureiro_congregacao') {
+    const list = todayReceipts();
+    const total = list.reduce((s, r) => s + r.value, 0);
+    const locked = isCollectionLocked();
+    let html = `<div class="card">
+      <div class="card-title-row">
+        <h3 class="card-title">Hoje</h3>
+        <span class="module-pill" style="background:${locked ? 'var(--error)' : 'var(--success)'}; color:#fff;">${locked ? 'Fechado' : 'Em aberto'}</span>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px;">
+        <div class="module-kpi"><div class="module-kpi-label">Recebido hoje</div><div class="module-kpi-value">${fmtMoney(total)}</div></div>
+        <div class="module-kpi"><div class="module-kpi-label">Lançamentos</div><div class="module-kpi-value">${list.length}</div></div>
+      </div>
+      <div class="module-note">${locked
+        ? 'A congregação já fechou o movimento. Você ainda pode consultar o movimento do dia.'
+        : 'A coleta está liberada. Registre cada dízimo ou oferta e acompanhe o movimento do dia.'}</div>`;
+
+    if (u.role === 'tesoureiro_congregacao') {
+      const sums = weekSumsFor(scopeCong(u.sectorId, u.congregationId), new Date());
+      const pend = pendingExpensesInWeek(scopeCong(u.sectorId, u.congregationId), new Date());
+      html += `<div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:12px;">
+        <div class="module-kpi"><div class="module-kpi-label">Receitas da semana</div><div class="module-kpi-value">${fmtMoney(sums.income)}</div></div>
+        <div class="module-kpi"><div class="module-kpi-label">Despesas da semana</div><div class="module-kpi-value">${fmtMoney(sums.expense)}</div></div>
+        <div class="module-kpi"><div class="module-kpi-label">Saldo da semana</div><div class="module-kpi-value">${fmtMoney(sums.balance)}</div></div>
+        <div class="module-kpi"><div class="module-kpi-label">Despesas pendentes</div><div class="module-kpi-value" style="color:${pend.length ? 'var(--warning)' : 'var(--success)'};">${pend.length}</div></div>
+      </div>`;
+      if (pend.length) {
+        html += `<div class="module-note" style="color:var(--warning);">${pend.length} despesa(s) aguardando aprovação do setor. O fechamento da semana fica bloqueado até a aprovação.</div>`;
+      }
+    }
+    box.innerHTML = html + '</div>';
+    return;
+  }
+
+  // Setor e sede: resumo da semana corrente vindo do servidor.
+  try {
+    const out = await Api.get('/api/closures/overview?weeks=1');
+    const wk = (out.weeks || [])[0];
+    const t = (wk && wk.totals) || {};
+    if (u.role === 'tesoureiro_setor') {
+      const secs = (wk && wk.sectors) || [];
+      const mine = u.sectorId ? secs.filter(s => s.sectorId === u.sectorId) : secs;
+      const open = mine.reduce((a, s) => a + ((s.totals && s.totals.open) || 0), 0);
+      const closed = mine.reduce((a, s) => a + ((s.totals && s.totals.closed) || 0), 0);
+      const validated = mine.reduce((a, s) => a + ((s.totals && s.totals.validated) || 0), 0);
+      const pend = pendingExpensesInWeek(scopeSector(u.sectorId), new Date());
+      box.innerHTML = `<div class="card">
+        <div class="card-title-row"><h3 class="card-title">Semana atual</h3><span class="module-pill" style="background:#eef3f8; color:var(--primary);">${esc(wk ? wk.label : '—')}</span></div>
+        <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px;">
+          <div class="module-kpi"><div class="module-kpi-label">Em aberto</div><div class="module-kpi-value" style="color:${open ? 'var(--warning)' : 'var(--success)'};">${open}</div></div>
+          <div class="module-kpi"><div class="module-kpi-label">Fechadas</div><div class="module-kpi-value">${closed}</div></div>
+          <div class="module-kpi"><div class="module-kpi-label">Validadas</div><div class="module-kpi-value" style="color:var(--success);">${validated}</div></div>
+          <div class="module-kpi"><div class="module-kpi-label">Despesas pendentes</div><div class="module-kpi-value" style="color:${pend.length ? 'var(--warning)' : 'var(--success)'};">${pend.length}</div></div>
+        </div>
+        <div class="module-note">${open ? `Há ${open} congregação(ões) que ainda não fecharam a semana.` : 'Todas as congregações do setor já fecharam a semana.'}${pend.length ? ` ${pend.length} despesa(s) aguardam sua aprovação.` : ''}</div>
+      </div>`;
+    } else {
+      const pendingPrest = ((wk && wk.sectors) || []).filter(s => s.prestacao && s.prestacao.status === 'submitted').length;
+      const received = t.sectorsReceived || 0;
+      const sectors = t.sectors || 0;
+      box.innerHTML = `<div class="card">
+        <div class="card-title-row"><h3 class="card-title">Semana atual</h3><span class="module-pill" style="background:#eef3f8; color:var(--primary);">${esc(wk ? wk.label : '—')}</span></div>
+        <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px;">
+          <div class="module-kpi"><div class="module-kpi-label">Setores recebidos</div><div class="module-kpi-value">${received}/${sectors}</div></div>
+          <div class="module-kpi"><div class="module-kpi-label">Prestações p/ aprovar</div><div class="module-kpi-value" style="color:${pendingPrest ? 'var(--warning)' : 'var(--success)'};">${pendingPrest}</div></div>
+          <div class="module-kpi"><div class="module-kpi-label">Congregações em aberto</div><div class="module-kpi-value" style="color:${t.open ? 'var(--warning)' : 'var(--success)'};">${t.open || 0}</div></div>
+          <div class="module-kpi"><div class="module-kpi-label">Validadas</div><div class="module-kpi-value" style="color:var(--success);">${t.validated || 0}</div></div>
+        </div>
+        <div class="module-note">${pendingPrest ? `${pendingPrest} prestação(ões) de setor aguardam aprovação da sede.` : 'Nenhuma prestação aguardando aprovação.'} ${received < sectors ? `${sectors - received} setor(es) ainda não foram recebidos.` : 'Todos os setores foram recebidos.'}</div>
+      </div>`;
+    }
+  } catch (e) {
+    box.innerHTML = `<div class="card"><div class="module-note">Resumo da semana indisponível sem conexão com o servidor. Os botões abaixo continuam funcionando.</div></div>`;
+  }
+}
+
+// Movimento do dia: visão simples e somente leitura dos lançamentos de hoje.
+function renderDayMovement() {
+  const u = currentUser;
+  const hero = $('dayHero');
+  if (!u || !hero) return;
+
+  const list = todayReceipts();
+  const total = list.reduce((s, r) => s + r.value, 0);
+  const byPay = sumByPayment(list, receiptPayment);
+  const isCong = u.role === 'tesoureiro_congregacao';
+  const locked = isCollectionLocked();
+
+  hero.innerHTML = `<div class="module-hero" style="background:linear-gradient(135deg, var(--primary), var(--primary-light));">
+    <div class="module-kicker">${u.role === 'coletor' ? 'Seus lançamentos' : (isCong ? 'Congregação' : 'Movimento do dia')}</div>
+    <h2>Movimento de hoje</h2>
+    <p>${esc(fmtDate(new Date()))} • ${list.length} lançamento(s)</p>
+    <div class="module-scope">${esc(moduleScopeLabel(u))}</div>
+  </div>`;
+
+  if ($('dayTotals')) {
+    $('dayTotals').innerHTML = `
+      <div class="confirm-item"><div class="confirm-label">Total do dia</div><div class="confirm-value amount">${fmtMoney(total)}</div></div>
+      <div class="confirm-item"><div class="confirm-label">Lançamentos</div><div class="confirm-value">${list.length}</div></div>
+      ${Object.entries(byPay).map(([p, v]) => `<div class="confirm-item"><div class="confirm-label">${esc(paymentLabel(p))}</div><div class="confirm-value">${fmtMoney(v)}</div></div>`).join('')}
+    `;
+  }
+
+  if ($('dayList')) {
+    $('dayList').innerHTML = list.length
+      ? list.map(r => `
+        <div class="list-item" style="display:flex; align-items:center; gap:8px;">
+          <div class="list-item-info" style="flex:1;">
+            <div class="list-item-title">${esc(r.person?.name || '—')}</div>
+            <div class="list-item-sub">${esc(r.type)} • ${fmtTime(new Date(r.date))} • ${esc(paymentLabel(receiptPayment(r)))}</div>
+          </div>
+          <span class="list-item-badge">${fmtMoney(r.value)}</span>
+        </div>`).join('')
+      : '<div class="empty" style="padding:20px; text-align:center; color:var(--text-muted); font-size:14px;">Nenhum lançamento hoje ainda.</div>';
+  }
+
+  if ($('dayClosureCard')) {
+    let body;
+    if (locked) {
+      body = `<h3 class="card-title" style="color:var(--error);">Movimento fechado</h3>
+        <p style="font-size:14px;">A congregação fechou o movimento desta semana. O dia continua disponível apenas para consulta.</p>`;
+    } else if (isCong) {
+      body = `<h3 class="card-title">O que fazer agora</h3>
+        <p style="font-size:14px;">Confira os lançamentos e, ao terminar o culto, feche o movimento da semana para enviar ao setor.</p>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
+          <button type="button" class="btn btn-primary" style="flex:1; min-width:180px;" onclick="navigate('screenNewReceipt')">Novo recebimento</button>
+          <button type="button" class="btn btn-outline" style="flex:1; min-width:180px;" onclick="navigate('screenWeeklyClose')">Fechar a semana</button>
+        </div>`;
+    } else if (u.role === 'coletor') {
+      body = `<h3 class="card-title">Coleta liberada</h3>
+        <p style="font-size:14px;">Você pode registrar novos recebimentos até a congregação fechar o movimento.</p>
+        <button type="button" class="btn btn-primary" style="margin-top:12px;" onclick="navigate('screenNewReceipt')">Novo recebimento</button>`;
+    } else {
+      body = `<h3 class="card-title">Somente leitura</h3>
+        <p style="font-size:14px;">Este é o movimento de hoje no seu escopo. Nenhuma ação é necessária nesta tela.</p>`;
+    }
+    $('dayClosureCard').innerHTML = `<div class="card">${body}</div>`;
+  }
+}
+
 function navigate(screenId) {
+  // Coletor: só coleta e consulta o movimento do dia. Qualquer outro destino é barrado.
+  if (currentUser?.role === 'coletor') {
+    const allowed = ['screenModule','screenNewReceipt','screenVoiceConfirm','screenPerson','screenConfirm','screenReceipt','screenDay','screenCongregation','screenLogin'];
+    if (!allowed.includes(screenId)) {
+      showToast('Seu perfil registra recebimentos e consulta o movimento do dia.', 'warning');
+      screenId = 'screenModule';
+    }
+  }
   // A câmera do leitor de QR só pode existir na tela de identificação da pessoa
   if (screenId !== 'screenPerson') stopQRScan();
   if (screenId !== 'screenSede') closeSedeAttendance();
@@ -2366,6 +2726,11 @@ function navigate(screenId) {
   const showHome = currentUser && screenId !== 'screenLogin' && screenId !== home;
   $('btnHome').style.display = showHome ? 'inline-flex' : 'none';
 
+  // O coletor não fecha o culto: o fechamento é feito pela congregação.
+  if ($('btnCloseServiceFromReceipt')) {
+    $('btnCloseServiceFromReceipt').style.display = currentUser?.role === 'coletor' ? 'none' : 'block';
+  }
+
   window.scrollTo(0, 0);
 
   // Painel do dia em tempo real: liga só no Painel, desliga nas outras telas
@@ -2374,7 +2739,23 @@ function navigate(screenId) {
 
   if (screenId === 'screenCloseService') renderServiceSummary();
   if (screenId === 'screenCongregation') renderCongregationScreen();
+  if (screenId === 'screenModule') renderModuleHome();
+  if (screenId === 'screenDay') renderDayMovement();
   if (screenId === 'screenNewReceipt') renderReceiptContext();
+
+  // Coletor/congregação: mantém o status de fechamento da semana atualizado ao abrir
+  // o módulo, o recebimento ou o movimento do dia (bloqueio de coleta em dia real).
+  if (['screenModule', 'screenNewReceipt', 'screenDay'].includes(screenId)
+      && ['coletor', 'tesoureiro_congregacao'].includes(currentUser?.role)
+      && HAS_FETCH_MODE()) {
+    refreshWeekClosures(new Date()).then(() => {
+      const sc = document.getElementById(screenId);
+      if (!sc || !sc.classList.contains('active')) return;
+      if (screenId === 'screenModule') renderModuleHome();
+      else if (screenId === 'screenDay') renderDayMovement();
+      else renderReceiptContext();
+    }).catch(() => {});
+  }
   if (screenId === 'screenAdmin') renderAdminScreen();
   if (screenId === 'screenUserRegister') renderUserRegisterScreen();
   if (screenId === 'screenSectorRegister') renderSectorRegisterScreen();
@@ -2576,13 +2957,8 @@ function updateAdminNav() {
   const nf = $('navFinance'); if (nf) nf.style.display = canManage(currentUser) ? 'flex' : 'none';
   const nc = $('navConsultas'); if (nc) nc.style.display = canManage(currentUser) ? 'flex' : 'none';
   const ns = $('navStructure'); if (ns) ns.style.display = canManage(currentUser) ? 'flex' : 'none';
-  const qa = $('qnavAdmin'); if (qa) qa.style.display = canManage(currentUser) ? 'inline-block' : 'none';
-  const qf = $('qnavFinance'); if (qf) qf.style.display = canManage(currentUser) ? 'inline-block' : 'none';
-  const qc = $('qnavConsultas'); if (qc) qc.style.display = canManage(currentUser) ? 'inline-block' : 'none';
-  const qs = $('qnavStructure'); if (qs) qs.style.display = canManage(currentUser) ? 'inline-block' : 'none';
-  const qd = $('qnavDashboard'); if (qd) qd.style.display = canViewDashboard(currentUser) ? 'inline-block' : 'none';
-  const qw = $('qnavWeekly'); if (qw) qw.style.display = canViewWeekly(currentUser) ? 'inline-block' : 'none';
-  const qsede = $('qnavSede'); if (qsede) qsede.style.display = currentUser?.role === 'sede' ? 'inline-block' : 'none';
+  // A barra rápida é montada dinamicamente por perfil.
+  renderQuickNav();
 }
 
 // Fechamento semanal: sede, tesoureiro de setor e de congregação
@@ -3362,7 +3738,7 @@ function deleteCongregation(secId, congId) {
 
 // ============ PAINEL DE CONTROLE ============
 function canViewDashboard(user) {
-  return user && ['sede', 'tesoureiro_setor', 'tesoureiro_congregacao', 'coletor'].includes(user.role);
+  return user && ['sede', 'tesoureiro_setor', 'tesoureiro_congregacao'].includes(user.role);
 }
 
 function updateDashboardNav() {
@@ -4046,7 +4422,7 @@ function printWeekly() {
 function renderDashboard() {
   if (!canViewDashboard(currentUser)) {
     showToast('Acesso restrito ao painel', 'error');
-    return navigate('screenNewReceipt');
+    return navigate(currentUser?.role === 'coletor' ? 'screenDay' : 'screenModule');
   }
 
   // Popula filtros de setor/congregação conforme o escopo do perfil.
@@ -7115,7 +7491,6 @@ async function init() {
     currentUser = savedUser;
     $('btnLogout').style.display = 'block';
     var _bb = $('bottombar'); if (_bb) _bb.style.display = 'none';
-    if($('quickNav')) $('quickNav').style.display = currentUser.role === 'membro' ? 'none' : 'flex';
     updateAdminNav();
     if (currentUser.role === 'membro') {
       navigate('screenMember');
@@ -7125,18 +7500,11 @@ async function init() {
     if (['coletor', 'tesoureiro_congregacao'].includes(currentUser.role)) {
       selectedSector = sectorsData.find(s => s.id === currentUser.sectorId);
       selectedCongregation = selectedSector?.congregations.find(c => c.id === currentUser.congregationId);
-      if (selectedSector && selectedCongregation) {
-        navigate('screenNewReceipt');
-        return;
-      }
-    }
-    if (currentUser.role === 'tesoureiro_setor') {
+    } else if (currentUser.role === 'tesoureiro_setor') {
       selectedSector = sectorsData.find(s => s.id === currentUser.sectorId);
       selectedCongregation = null;
-      navigate('screenDashboard');
-      return;
     }
-    navigate('screenDashboard');
+    navigate('screenModule');
   } else {
     navigate('screenLogin');
   }
