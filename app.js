@@ -12,8 +12,8 @@ function showVersionBadge() {
 }
 
 // ============ VERSAO DO SISTEMA ============
-const APP_VERSION = '2026-11-18-v23';
-const APP_BUILD = 'congregation-expense-approval';
+const APP_VERSION = '2026-11-22-v24';
+const APP_BUILD = 'mobile-quicknav-fix';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({

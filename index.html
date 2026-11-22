@@ -50,6 +50,53 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
 .screen { display: none; flex: 1; flex-direction: column; padding: calc(var(--topbar-h) + 16px) 16px calc(var(--bottom-h) + 24px); overflow-y: auto; }
 .screen.active { display: flex; }
 
+/* Navegação rápida (mobile-first).
+   Precisa valer em TODAS as larguras: a barra fica logo abaixo do topbar fixo.
+   Antes estas regras estavam dentro de @media (min-width:1024px), então no celular
+   a barra ficava sem estilo e escondida atrás do topbar (position static em y=0). */
+.quick-nav {
+  display: none;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  position: sticky;
+  top: var(--topbar-h);
+  z-index: 90;
+  touch-action: manipulation;
+}
+.quick-nav .qnav-btn {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--primary);
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.quick-nav .qnav-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+.quick-nav .qnav-danger { color: var(--error); border-color: #f0caca; }
+
+/* Celular: quebra em linhas compactas para todos os atalhos ficarem visíveis,
+   sem depender de rolagem horizontal (difícil de descobrir na tela pequena). */
+@media (max-width: 640px) {
+  .quick-nav { flex-wrap: wrap; overflow-x: visible; padding: 6px 8px; gap: 4px; }
+  .quick-nav .qnav-btn { padding: 6px 9px; font-size: 12px; }
+  /* "Sair" já fica fixo no topo; evita uma terceira linha só para ele */
+  #quickNav .qnav-danger { display: none; }
+}
+
 /* Tablet: coluna central confortável (formulários e leitura) */
 @media (min-width: 720px) {
   .screen { align-items: center; padding: calc(var(--topbar-h) + 20px) 24px calc(var(--bottom-h) + 28px); }
@@ -74,11 +121,6 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
   .app .nav-btn { flex: 0 0 auto; padding: 6px 16px; font-size: 11px; touch-action: manipulation; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
   .nav-btn * { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
   .bottombar { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
-  /* Navegação rápida (fallback) */
-  .quick-nav { display:none; gap:6px; padding:8px 10px; background: var(--card); border-bottom:1px solid var(--border); overflow-x:auto; -webkit-overflow-scrolling:touch; position:sticky; top:var(--topbar-h); z-index:90; touch-action: manipulation; }
-  .quick-nav .qnav-btn { flex:0 0 auto; border:1px solid var(--border); background:#fff; color:var(--primary); padding:8px 12px; border-radius:999px; font-size:13px; font-weight:600; cursor:pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
-  .quick-nav .qnav-btn.active { background: var(--primary); color:#fff; border-color: var(--primary); }
-  .quick-nav .qnav-danger { color: var(--error); border-color: #f0caca; }
   #voiceFallbackNotice { display:none; margin:10px 0; padding:10px 12px; border-radius:8px; background:#FFF8E1; border:1px solid #FFE082; color:#6D4C00; font-size:13px; }
 
   .screen {
@@ -1445,7 +1487,7 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
   <div class="toast" id="toast"></div>
 </div>
 
-<script src="app.js?v=31"></script>
+<script src="app.js?v=32"></script>
 
 
 <script src="mbw.js?v=12"></script>
