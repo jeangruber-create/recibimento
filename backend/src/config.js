@@ -36,4 +36,18 @@ module.exports = {
   crossSite,
   trustProxy: process.env.TRUST_PROXY === '1',
   frontFile: resolveFrontFile(),
+  whatsapp: {
+    provider: (process.env.WHATSAPP_PROVIDER || 'evolution').toLowerCase(),
+    apiUrl: process.env.WHATSAPP_API_URL || '',
+    apiKey: process.env.WHATSAPP_API_KEY || '',
+    instance: process.env.WHATSAPP_INSTANCE || '',
+    number: process.env.WHATSAPP_NUMBER || '',
+    cloudToken: process.env.WHATSAPP_CLOUD_TOKEN || '',
+    cloudPhoneNumberId: process.env.WHATSAPP_CLOUD_PHONE_NUMBER_ID || '',
+    apiVersion: process.env.WHATSAPP_API_VERSION || 'v21.0',
+    timeoutMs: parseInt(process.env.WHATSAPP_TIMEOUT_MS || '15000', 10),
+    thanksMessage:
+      process.env.WHATSAPP_THANKS_MESSAGE ||
+      'A paz do Senhor, {nome}! A Assembleia de Deus Missões agradece de coração pelo seu {tipo} de {valor}. "Cada um contribua segundo tiver proposto no coração" (2 Coríntios 9:7). Deus abençoe você e sua família!',
+  },
 };

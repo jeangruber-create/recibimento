@@ -55,7 +55,7 @@ Depois abra `http://localhost:8080/index.html` (o front detecta a API em `http:/
 - **Limite de despesa**: o teto de **40%** é calculado sobre o **total de receitas da semana** (seg→dom), nunca por dia. Fechar dentro do limite (mesmo com saldo) libera o movimento; só exige justificativa quando as despesas passam de 40%.
 - **Portal do membro (autocadastro)**: o fiel cria a própria conta em **"Sou membro — quero me cadastrar"** na tela de login, informando **nome completo, CPF, CEP, número da residência e celular** (mais e-mail e senha). Esses dados alimentam os demais módulos. Após o cadastro, o sistema confirma o celular por um **código de 6 dígitos**. O membro ganha um **código único (ADMxxxxxx)** e um QR code.
 - **Senha do fiel**: é definida pelo próprio membro no autocadastro. Se perder, **somente o admin** redefine (`🔑` na lista de usuários), gerando uma **senha temporária** que o fiel troca no 1º acesso.
-- **Agradecimento por WhatsApp**: ao registrar um recibo, se o contribuinte for identificado por **código de membro ou CPF**, o botão **"Agradecer por WhatsApp"** abre o `wa.me` com uma mensagem de agradecimento personalizada (sem custo de API). O coletor também pode buscar o membro por nome, código ou CPF.
+- **Agradecimento por WhatsApp (fila da sede)**: todo **dízimo confirmado** de **membro com celular válido** entra automaticamente numa **fila diária** (`Gerenciar → Agradecimentos`). A sede revisa o texto, o telefone e envia em lote pela **API de WhatsApp** (Evolution por padrão; Cloud API opcional), com registro de auditoria e opção de reenviar/dispensar. **Visitantes e contribuições sem cadastro não entram na fila**. O botão antigo `wa.me` continua disponível apenas como atalho manual no detalhe do recibo/na ficha do membro.
 - **Ditado de voz (coleta)**: o reconhecimento de fala usa **20 s de silêncio** antes de encerrar (configurável em `SpeechService.silenceMs`), com **limite de 3 min** por sessão e **religamento automático** quando o navegador (comum no Chrome do celular) encerra a escuta sozinho. Assim o coletor pode ditar os dados com calma, sem o ditado fechar no meio.
 - **Uso offline (PWA)**: o app é instalável (manifest + service worker) e abre sem internet. Sem conexão, **recibos e despesas** são gravados numa **fila de sincronização** local e enviados automaticamente quando a internet volta (ou manualmente, tocando no indicador no topo). O badge no topo mostra o estado: `🟢 Online`, `⏳ N pendentes` ou `📴 Offline (N)`.
 - **Dizimar/Ofertar de casa (portal do membro)**: o membro registra o próprio **dízimo** ou **oferta** pelo portal, direto de casa. O lançamento é **sempre PIX**, fica **vinculado ao código/CPF do membro** e **gera um recibo automaticamente** na congregação dele. O portal exibe a **chave PIX da congregação** e gera o **PIX copia-e-cola (BR Code) + QR Code** já com o valor digitado (ou sem valor, se não informado), para o membro pagar direto pelo app do banco.
@@ -216,6 +216,22 @@ declara `directUrl = env("DIRECT_URL")`, então `prisma migrate deploy` usa a co
    (`https://adm-recebimentos-api.onrender.com/`) → tela de login.
 
 Outras variáveis do blueprint: `NODE_ENV`, `JWT_SECRET` (gerado), `CORS_ORIGIN` e `TRUST_PROXY=1`.
+
+#### 6.2.1 Agradecimentos por WhatsApp
+
+No painel do Render (**Environment → Add Environment Variable**) configure a instância dedicada:
+
+| Variável | Exemplo | Observação |
+|---|---|---|
+| `WHATSAPP_PROVIDER` | `evolution` | Padrão; use `cloud` para a API oficial da Meta |
+| `WHATSAPP_API_URL` | `https://api.exemplo.com` | Base da Evolution (sem o `/message/...`) |
+| `WHATSAPP_API_KEY` | `...` | Token/instância da API |
+| `WHATSAPP_INSTANCE` | `adm-missoes` | Instância conectada via QR |
+| `WHATSAPP_NUMBER` | `5511999999999` | Número dedicado exibido na tela da sede |
+| `WHATSAPP_THANKS_MESSAGE` | texto com `{nome}`, `{tipo}`, `{valor}` | Opcional |
+
+Sem essas variáveis a fila é criada normalmente, mas o envio falha com aviso claro na tela.
+Use um **número dedicado** (não o celular pessoal do pastor) para evitar bloqueios.
 
 ### 6.3 Seed dos usuários (na sua máquina)
 

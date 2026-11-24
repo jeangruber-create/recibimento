@@ -24,3 +24,18 @@ services:
         value: https://adm-recebimentos-api.onrender.com
       - key: TRUST_PROXY
         value: "1"
+      # Agradecimentos por WhatsApp (Evolution API por padrão).
+      # Preencha no painel do Render (Environment) com o número/instância dedicados da igreja.
+      - key: WHATSAPP_PROVIDER
+        value: evolution
+      - key: WHATSAPP_API_URL
+        sync: false
+      - key: WHATSAPP_API_KEY
+        sync: false
+      - key: WHATSAPP_INSTANCE
+        sync: false
+      - key: WHATSAPP_NUMBER
+        sync: false
+      # Opcional: texto personalizado. Use {nome}, {tipo} e {valor}.
+      - key: WHATSAPP_THANKS_MESSAGE
+        sync: false

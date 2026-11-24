@@ -12,8 +12,8 @@ function showVersionBadge() {
 }
 
 // ============ VERSAO DO SISTEMA ============
-const APP_VERSION = '2026-11-22-v25';
-const APP_BUILD = 'role-modules-simplified';
+const APP_VERSION = '2026-11-24-v26';
+const APP_BUILD = 'whatsapp-thanks-queue';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
@@ -130,8 +130,10 @@ const ROLE_MODULE = {
     color: '#1B3A5C',
     actions: [
       { icon: '🏦', label: 'Receber setores', desc: 'Conferir e receber o fechamento de cada setor', screen: 'screenSede', primary: true },
+      { icon: '💬', label: 'Agradecimentos', desc: 'Revisar e enviar o agradecimento aos dizimistas', screen: 'screenThanks' },
       { icon: '📅', label: 'Visão geral da semana', desc: 'Acompanhar congregações e setores', screen: 'screenWeeklyClose' },
       { icon: '💰', label: 'Controle financeiro', desc: 'Entradas, saídas, saldo e contas a pagar', screen: 'screenFinanceControl' },
+      { icon: '👥', label: 'Membros & Contatos', desc: 'Base de membros, cadastros e agradecimentos manuais', screen: 'screenMembers' },
       { icon: '⚙️', label: 'Gestão e cadastros', desc: 'Setores, congregações, usuários e membros', screen: 'screenAdmin' },
       { icon: '📊', label: 'Painel geral', desc: 'Indicadores e movimentos consolidados', screen: 'screenDashboard' },
     ],
@@ -2421,6 +2423,159 @@ function printReceipt() {
   window.print();
 }
 
+// ===== AGRADECIMENTOS POR WHATSAPP (fila diária da sede) =====
+let thanksQueueState = { date: '', status: 'all', data: null, busy: false };
+
+function thanksLocalDate() {
+  const d = new Date();
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
+function thanksStatusMeta(status) {
+  const map = {
+    pending: { label: 'Aguardando', cls: 'pending' },
+    sent: { label: 'Enviado', cls: 'sent' },
+    failed: { label: 'Falhou', cls: 'failed' },
+    skipped: { label: 'Dispensado', cls: 'skipped' },
+  };
+  return map[status] || { label: status || '—', cls: '' };
+}
+
+function thanksVisibleItems() {
+  const items = (thanksQueueState.data && thanksQueueState.data.items) || [];
+  if (thanksQueueState.status === 'all') return items;
+  return items.filter(i => i.status === thanksQueueState.status);
+}
+
+function setThanksBusy(busy) {
+  thanksQueueState.busy = busy;
+  document.querySelectorAll('.thanks-action-btn').forEach(b => { b.disabled = busy; });
+}
+
+function renderThanksScreen() {
+  if (!thanksQueueState.date) thanksQueueState.date = thanksLocalDate();
+  const hero = $('thanksHero');
+  if (!hero) return;
+  hero.innerHTML = `<div class="module-hero" style="background:linear-gradient(135deg,#1B3A5C,var(--primary-light));">
+    <div class="module-kicker">Tesouraria Sede</div>
+    <h2>Agradecimentos por WhatsApp</h2>
+    <p>Revise os dízimos confirmados do dia e envie o agradecimento aos membros com celular cadastrado.</p>
+    <div class="module-scope">Visitantes e recebimentos sem cadastro não entram nesta fila.</div>
+  </div>`;
+  if ($('thanksDate')) $('thanksDate').value = thanksQueueState.date;
+  if ($('thanksStatus')) $('thanksStatus').value = thanksQueueState.status;
+  loadThanksQueue();
+}
+
+async function loadThanksQueue(prepare = false) {
+  if (!HAS_FETCH_MODE()) {
+    const list = $('thanksList');
+    if (list) list.innerHTML = '<div class="empty">A fila de agradecimentos exige conexão com o servidor.</div>';
+    return;
+  }
+  try {
+    if (prepare) await Api.post('/api/thanks/build', { date: thanksQueueState.date });
+    const out = await Api.get('/api/thanks/queue?date=' + encodeURIComponent(thanksQueueState.date));
+    thanksQueueState.data = out;
+    renderThanksSummary(out);
+    renderThanksList();
+  } catch (e) {
+    const list = $('thanksList');
+    if (list) list.innerHTML = '<div class="empty">Não foi possível carregar a fila. Tente novamente.</div>';
+    apiErrorToast(e);
+  }
+}
+
+function renderThanksSummary(out) {
+  const c = out.counts || {};
+  const cfg = out.whatsapp || {};
+  if ($('thanksSummary')) {
+    $('thanksSummary').innerHTML = `
+      <div class="module-kpi"><div class="module-kpi-label">Aguardando</div><div class="module-kpi-value">${c.pending || 0}</div></div>
+      <div class="module-kpi"><div class="module-kpi-label">Enviados</div><div class="module-kpi-value" style="color:var(--success);">${c.sent || 0}</div></div>
+      <div class="module-kpi"><div class="module-kpi-label">Falhas</div><div class="module-kpi-value" style="color:var(--error);">${c.failed || 0}</div></div>
+      <div class="module-kpi"><div class="module-kpi-label">Dispensados</div><div class="module-kpi-value">${c.skipped || 0}</div></div>`;
+  }
+  if ($('thanksConfig')) {
+    const number = cfg.number ? String(cfg.number) : '';
+    $('thanksConfig').innerHTML = cfg.configured
+      ? `<span class="module-pill" style="background:var(--success); color:#fff;">API configurada</span>
+         <span class="module-note" style="display:inline; margin-left:8px;">${esc(cfg.provider || 'evolution')}${number ? ' • ' + esc(number) : ''}</span>`
+      : `<span class="module-pill" style="background:var(--error); color:#fff;">API não configurada</span>
+         <span class="module-note" style="display:inline; margin-left:8px;">Configure WHATSAPP_API_URL, WHATSAPP_API_KEY e WHATSAPP_INSTANCE no Render para enviar.</span>`;
+  }
+  const busy = thanksQueueState.busy;
+  if ($('btnThanksSendAll')) $('btnThanksSendAll').disabled = busy || !(c.pending > 0);
+  if ($('btnThanksRetry')) $('btnThanksRetry').disabled = busy || !(c.failed > 0);
+  if ($('btnThanksBuild')) $('btnThanksBuild').disabled = busy;
+  if ($('btnThanksRefresh')) $('btnThanksRefresh').disabled = busy;
+}
+
+function renderThanksList() {
+  const box = $('thanksList');
+  if (!box) return;
+  const items = thanksVisibleItems();
+  if (!items.length) {
+    box.innerHTML = '<div class="empty" style="padding:20px; text-align:center; color:var(--text-muted);">Nenhum agradecimento neste filtro.</div>';
+    return;
+  }
+  box.innerHTML = items.map(i => {
+    const meta = thanksStatusMeta(i.status);
+    const canSend = i.status === 'pending' || i.status === 'failed' || i.status === 'sent';
+    const sendLabel = i.status === 'failed' ? 'Tentar novamente' : (i.status === 'sent' ? 'Reenviar' : 'Enviar agora');
+    const force = i.status === 'sent' || i.status === 'failed';
+    return `
+      <div class="thanks-item">
+        <div class="thanks-item-head">
+          <div>
+            <div class="list-item-title">${esc(i.personName || '—')}</div>
+            <div class="thanks-meta">${esc(i.type || 'Dízimo')} • ${fmtMoney(Number(i.value || 0))} • ${esc(i.maskedPhone || i.phone || '')}${i.memberCode ? ' • ' + esc(i.memberCode) : ''}${i.attempts ? ' • ' + i.attempts + ' tentativa(s)' : ''}${i.sentAt ? ' • enviado ' + esc(fmtDate(new Date(i.sentAt)) + ' ' + fmtTime(new Date(i.sentAt))) : ''}</div>
+          </div>
+          <span class="thanks-badge ${meta.cls}">${esc(meta.label)}</span>
+        </div>
+        <div class="thanks-msg">${esc(i.message || '')}</div>
+        ${i.lastError ? `<div class="thanks-error">${esc(i.lastError)}</div>` : ''}
+        <div class="thanks-actions">
+          ${canSend ? `<button type="button" class="btn btn-primary thanks-action-btn" onclick="sendThanks(['${i.id}'], ${force ? 'true' : 'false'})">${sendLabel}</button>` : ''}
+          ${i.status !== 'sent' ? `<button type="button" class="btn btn-outline thanks-action-btn" onclick="skipThanks('${i.id}')">Dispensar</button>` : ''}
+          ${i.receiptId ? `<button type="button" class="btn btn-ghost thanks-action-btn" onclick="viewReceiptDetail('${i.receiptId}')">Ver recibo</button>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function sendThanks(ids, force = false) {
+  if (!ids || !ids.length || thanksQueueState.busy) return;
+  setThanksBusy(true);
+  try {
+    const out = await Api.post('/api/thanks/send', { ids, force: !!force });
+    const s = out.summary || {};
+    showToast(`Enviados: ${s.sent || 0} • Falhas: ${s.failed || 0} • Ignorados: ${s.skipped || 0}`, s.failed ? 'warning' : 'success');
+    await loadThanksQueue();
+  } catch (e) {
+    apiErrorToast(e);
+  } finally {
+    setThanksBusy(false);
+    if (thanksQueueState.data) renderThanksSummary(thanksQueueState.data);
+  }
+}
+
+async function skipThanks(id) {
+  if (!id || thanksQueueState.busy) return;
+  if (typeof confirm === 'function' && !confirm('Dispensar este agradecimento? Ele não será enviado.')) return;
+  setThanksBusy(true);
+  try {
+    await Api.post('/api/thanks/skip', { ids: [id], reason: 'Dispensado pela sede' });
+    showToast('Agradecimento dispensado.', 'success');
+    await loadThanksQueue();
+  } catch (e) {
+    apiErrorToast(e);
+  } finally {
+    setThanksBusy(false);
+    if (thanksQueueState.data) renderThanksSummary(thanksQueueState.data);
+  }
+}
+
 // CLOSE SERVICE
 // Tela inicial de cada perfil (destino do botão "Início")
 function getHomeScreen() {
@@ -2508,6 +2663,7 @@ function renderQuickNav() {
     items.push({ label: 'Congregações', screen: 'screenAdmin', id: 'qnavAdmin' });
   } else if (u.role === 'sede') {
     items.push({ label: 'Receber setores', screen: 'screenSede', id: 'qnavSede' });
+    items.push({ label: 'Agradecimentos', screen: 'screenThanks', id: 'qnavThanks' });
     items.push({ label: 'Semana', screen: 'screenWeeklyClose', id: 'qnavWeekly' });
     items.push({ label: 'Finanças', screen: 'screenFinanceControl', id: 'qnavFinance' });
     items.push({ label: 'Painel', screen: 'screenDashboard', id: 'qnavDashboard' });
@@ -2713,6 +2869,10 @@ function navigate(screenId) {
       screenId = 'screenModule';
     }
   }
+  if (screenId === 'screenThanks' && currentUser?.role !== 'sede') {
+    showToast('Somente a sede pode revisar os agradecimentos.', 'warning');
+    screenId = getHomeScreen();
+  }
   // A câmera do leitor de QR só pode existir na tela de identificação da pessoa
   if (screenId !== 'screenPerson') stopQRScan();
   if (screenId !== 'screenSede') closeSedeAttendance();
@@ -2765,6 +2925,7 @@ function navigate(screenId) {
   if (screenId === 'screenAdminWeeklyReceipts') adminWeeklyData = null;
   if (screenId === 'screenAdminWeeklyReceipts' && typeof renderAdminWeeklyReceipts === 'function') renderAdminWeeklyReceipts();
   if (screenId === 'screenSede') { sedeData = null; renderSedeModule(); }
+  if (screenId === 'screenThanks') renderThanksScreen();
   if (screenId === 'screenFinanceControl') renderFinanceControl();
   if (screenId === 'screenConsultas') renderConsultasScreen();
   if (screenId === 'screenStructure') renderStructureScreen();;

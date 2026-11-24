@@ -7,6 +7,7 @@ const { receiptWhere, resolveReceiptScope, canWriteReceipt, memberSelfReceipt } 
 const { resolveWeekStart } = require('../lib/week');
 const { receipt: serializeReceipt } = require('../lib/serialize');
 const { logAudit } = require('../lib/audit');
+const { ensureThankYou } = require('../lib/thanks');
 
 const router = express.Router();
 router.use(authRequired);
@@ -139,6 +140,8 @@ router.post('/', async (req, res, next) => {
           createdById,
         },
       });
+      // Dízimos confirmados de membros com celular entram na fila da sede.
+      await ensureThankYou(tx, created, req.user);
       await logAudit(tx, {
         user: req.user,
         action: 'receipt.create',
@@ -170,6 +173,8 @@ router.put('/:id/confirm', async (req, res, next) => {
         where: { id: existing.id },
         data: { status: 'confirmado', confirmedAt: new Date(), confirmedByEmail: req.user.email || null },
       });
+      // A fila só nasce depois da confirmação do recebimento.
+      await ensureThankYou(tx, updated, req.user);
       await logAudit(tx, {
         user: req.user,
         action: 'receipt.confirm',

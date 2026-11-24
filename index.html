@@ -139,6 +139,20 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
 .module-pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; }
 .module-note { font-size: 13px; color: var(--text-muted); margin-top: 10px; line-height: 1.5; }
 
+/* ===== Fila de agradecimentos (sede) ===== */
+.thanks-item { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px; background: #fff; }
+.thanks-item-head { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; }
+.thanks-meta { font-size: 12px; color: var(--text-muted); margin-top: 3px; line-height: 1.5; }
+.thanks-badge { font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px; white-space: nowrap; background: #eef3f8; color: var(--primary); }
+.thanks-badge.pending { background: #fff4d6; color: #8a6100; }
+.thanks-badge.sent { background: #e6f5ea; color: var(--success); }
+.thanks-badge.failed { background: #fdeaea; color: var(--error); }
+.thanks-badge.skipped { background: #eee; color: var(--text-muted); }
+.thanks-msg { margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-sm); background: #fafafa; font-size: 13px; line-height: 1.55; color: var(--text); }
+.thanks-error { margin-top: 8px; font-size: 12px; color: var(--error); }
+.thanks-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.thanks-actions .btn { flex: 1; min-width: 120px; font-size: 13px; }
+
 /* Tablet: coluna central confortável (formulários e leitura) */
 @media (min-width: 720px) {
   .screen { align-items: center; padding: calc(var(--topbar-h) + 20px) 24px calc(var(--bottom-h) + 28px); }
@@ -414,6 +428,44 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
       <div id="dayList"></div>
     </div>
     <div id="dayClosureCard"></div>
+  </section>
+
+  <!-- SCREEN: AGRADECIMENTOS POR WHATSAPP (fila diária da sede) -->
+  <section class="screen" id="screenThanks" data-title="Agradecimentos por WhatsApp">
+    <div id="thanksHero"></div>
+    <div class="card">
+      <div class="card-title-row">
+        <h3 class="card-title">Fila do dia</h3>
+        <button type="button" class="btn btn-ghost" id="btnThanksRefresh" onclick="loadThanksQueue()" style="font-size:12px; padding:6px 12px;">Atualizar</button>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px;">
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">Data</label>
+          <input type="date" class="form-input" id="thanksDate" onchange="thanksQueueState.date = this.value || thanksLocalDate(); loadThanksQueue()">
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">Mostrar</label>
+          <select class="form-input" id="thanksStatus" onchange="thanksQueueState.status = this.value; renderThanksList()">
+            <option value="all">Todos</option>
+            <option value="pending">Aguardando</option>
+            <option value="failed">Falhas</option>
+            <option value="sent">Enviados</option>
+            <option value="skipped">Dispensados</option>
+          </select>
+        </div>
+      </div>
+      <div id="thanksConfig" style="margin-top:12px;"></div>
+      <div id="thanksSummary" class="confirm-grid" style="margin-top:12px;"></div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
+        <button type="button" class="btn btn-primary" id="btnThanksSendAll" style="flex:1; min-width:150px;" onclick="sendThanks((thanksQueueState.data?.items || []).filter(i => i.status === 'pending').map(i => i.id), false)">Enviar pendentes</button>
+        <button type="button" class="btn btn-outline" id="btnThanksRetry" style="flex:1; min-width:150px;" onclick="sendThanks((thanksQueueState.data?.items || []).filter(i => i.status === 'failed').map(i => i.id), true)">Tentar falhas</button>
+        <button type="button" class="btn btn-outline" id="btnThanksBuild" style="flex:1; min-width:150px;" onclick="loadThanksQueue(true)">Preparar fila do dia</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3 class="card-title">Mensagens revisadas</h3>
+      <div id="thanksList" style="display:flex; flex-direction:column; gap:10px;"></div>
+    </div>
   </section>
 
   <!-- SCREEN: AUTOCADASTRO DO MEMBRO -->
@@ -1549,7 +1601,7 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
   <div class="toast" id="toast"></div>
 </div>
 
-<script src="app.js?v=33"></script>
+<script src="app.js?v=34"></script>
 
 
 <script src="mbw.js?v=12"></script>
