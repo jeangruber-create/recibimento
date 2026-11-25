@@ -5,11 +5,22 @@ const { toNumber } = require('./serialize');
 // Recibos pendentes (dízimo/oferta de membro ainda não confirmados) não entram nos totais.
 const CONFIRMED_RECEIPT = { NOT: { status: 'pendente' } };
 
+// Despesas canceladas/rejeitadas continuam visíveis para auditoria, mas não são gasto realizado.
+const ACTIVE_EXPENSE = {
+  NOT: [
+    { status: 'voided' },
+    { reviewStatus: 'voided' },
+    { status: 'canceled' },
+    { status: 'rejected' },
+    { reviewStatus: 'rejected' },
+  ],
+};
+
 async function weekSums(where, weekStart) {
   const { start, end } = weekBounds(weekStart);
   const [inc, exp] = await Promise.all([
     prisma.receipt.aggregate({ where: { ...where, ...CONFIRMED_RECEIPT, date: { gte: start, lte: end } }, _sum: { value: true } }),
-    prisma.expense.aggregate({ where: { ...where, date: { gte: start, lte: end } }, _sum: { value: true } }),
+    prisma.expense.aggregate({ where: { ...where, ...ACTIVE_EXPENSE, date: { gte: start, lte: end } }, _sum: { value: true } }),
   ]);
   const income = toNumber(inc._sum.value) || 0;
   const expense = toNumber(exp._sum.value) || 0;
@@ -24,7 +35,7 @@ async function findPrestacao(scopeWhere, weekStart) {
       where: { ...scopeWhere, ...CONFIRMED_RECEIPT, date: { gte: start, lte: end } },
       select: { value: true, payment: true, source: true, personMemberCode: true, type: true },
     }),
-    prisma.expense.findMany({ where: { ...scopeWhere, date: { gte: start, lte: end } }, select: { value: true, payment: true } }),
+    prisma.expense.findMany({ where: { ...scopeWhere, ...ACTIVE_EXPENSE, date: { gte: start, lte: end } }, select: { value: true, payment: true } }),
   ]);
   const incomeBy = {};
   const expenseBy = {};

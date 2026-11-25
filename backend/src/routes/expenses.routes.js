@@ -58,6 +58,11 @@ function canReviewExpense(user, e) {
   return false;
 }
 
+// Cancelamento é sempre lógico: o registro permanece para auditoria.
+function isVoided(e) {
+  return !!e && (e.status === 'voided' || e.reviewStatus === 'voided' || e.status === 'canceled');
+}
+
 function expenseScopeWhere(user) {
   if (user.role === 'sede') return {};
   if (user.role === 'tesoureiro_setor') return { sectorId: user.sectorId };
@@ -150,9 +155,9 @@ router.post('/', async (req, res, next) => {
 });
 
 const reviewSchema = z.object({
-  reviewStatus: z.enum(['pending', 'reviewed', 'approved', 'rejected', 'flagged']).optional(),
+  reviewStatus: z.enum(['pending', 'reviewed', 'approved', 'rejected', 'flagged', 'voided']).optional(),
   status: z.enum(['pending', 'approved', 'rejected', 'paid', 'voided']).optional(),
-  action: z.enum(['review', 'approve', 'reject', 'flag', 'pending', 'pay']).optional(),
+  action: z.enum(['review', 'approve', 'reject', 'flag', 'pending', 'pay', 'cancel']).optional(),
   note: z.string().max(500).optional().nullable(),
 });
 
@@ -164,6 +169,7 @@ function resolveExpenseReview(action, reviewStatus, status) {
   else if (action === 'flag') { rs = rs || 'flagged'; }
   else if (action === 'pending') { rs = rs || 'pending'; st = st || 'pending'; }
   else if (action === 'pay') { rs = rs || 'approved'; st = st || 'paid'; }
+  else if (action === 'cancel') { rs = 'voided'; st = 'voided'; }
   return { reviewStatus: rs, status: st };
 }
 
@@ -173,10 +179,13 @@ router.put('/:id/review', async (req, res, next) => {
     const data = reviewSchema.parse(req.body);
     const resolved = resolveExpenseReview(data.action, data.reviewStatus, data.status);
     if (!resolved.reviewStatus && !resolved.status) throw httpError(400, 'Informe action, reviewStatus ou status');
-    const existing = await prisma.expense.findUnique({ where: { id: req.params.id } });
+    const existing = await prisma.expense.findFirst({ where: { ...expenseScopeWhere(req.user), id: req.params.id } });
     if (!existing) throw httpError(404, 'Despesa não encontrada');
     if (!canReviewExpense(req.user, existing)) {
       throw httpError(403, 'Apenas o tesoureiro de setor ou a sede podem aprovar despesas');
+    }
+    if (isVoided(existing) && data.action !== 'cancel' && resolved.status !== 'voided' && resolved.reviewStatus !== 'voided') {
+      throw httpError(409, 'Despesa cancelada; o registro é mantido apenas para auditoria');
     }
 
     const expense = await prisma.$transaction(async (tx) => {
@@ -193,7 +202,7 @@ router.put('/:id/review', async (req, res, next) => {
       });
       await logAudit(tx, {
         user: req.user,
-        action: 'expense.review',
+        action: data.action === 'cancel' ? 'expense.cancel' : 'expense.review',
         entity: 'Expense',
         entityId: existing.id,
         sectorId: existing.sectorId,
@@ -213,9 +222,10 @@ router.put('/:id/review', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const data = createSchema.partial().parse(req.body);
-    const existing = await prisma.expense.findUnique({ where: { id: req.params.id } });
+    const existing = await prisma.expense.findFirst({ where: { ...expenseScopeWhere(req.user), id: req.params.id } });
     if (!existing) throw httpError(404, 'Despesa não encontrada');
     if (!canWriteExpense(req.user, existing)) throw httpError(403, 'Sem permissão para alterar esta despesa');
+    if (isVoided(existing)) throw httpError(409, 'Despesa cancelada; o registro é mantido apenas para auditoria');
 
     // Edição feita pela congregação volta para a fila de aprovação do setor.
     // Edição feita pelo setor/sede já é considerada aprovada por quem revisou.
@@ -272,28 +282,66 @@ router.put('/:id', async (req, res, next) => {
   }
 });
 
-router.delete('/:id', async (req, res, next) => {
+const cancelSchema = z.object({
+  note: z.string().max(500).optional().nullable(),
+});
+
+// Cancelamento lógico: a despesa continua no banco e nas listagens como CANCELADA.
+// Nunca mais há exclusão física de despesa, para preservar a trilha de auditoria.
+async function cancelExpense(req, res, next) {
   try {
-    const existing = await prisma.expense.findUnique({ where: { id: req.params.id } });
+    const { note } = cancelSchema.parse(req.body || {});
+    const existing = await prisma.expense.findFirst({ where: { ...expenseScopeWhere(req.user), id: req.params.id } });
     if (!existing) throw httpError(404, 'Despesa não encontrada');
-    if (!canWriteExpense(req.user, existing)) throw httpError(403, 'Sem permissão para excluir esta despesa');
-    await prisma.$transaction(async (tx) => {
-      await tx.expense.delete({ where: { id: req.params.id } });
+    if (!canWriteExpense(req.user, existing)) throw httpError(403, 'Sem permissão para cancelar esta despesa');
+    if (isVoided(existing)) return res.json({ ok: true, expense: serializeExpense(existing, true) });
+
+    const reason = (note || '').trim() || 'Cancelada pelo tesoureiro';
+    const expense = await prisma.$transaction(async (tx) => {
+      const updated = await tx.expense.update({
+        where: { id: existing.id },
+        data: {
+          status: 'voided',
+          reviewStatus: 'voided',
+          reviewNote: existing.reviewNote ? `${existing.reviewNote} • ${reason}` : reason,
+          reviewedById: req.user.sub,
+          reviewedByName: req.user.name || req.user.email || null,
+          reviewedAt: new Date(),
+        },
+      });
       await logAudit(tx, {
         user: req.user,
-        action: 'expense.delete',
+        action: 'expense.cancel',
         entity: 'Expense',
         entityId: existing.id,
         sectorId: existing.sectorId,
         congregationId: existing.congregationId,
-        summary: `Exclusão de ${existing.category}`,
-        before: { category: existing.category, value: Number(existing.value), payment: existing.payment, description: existing.description ?? '' },
+        summary: `Cancelamento de ${existing.category} (registro mantido para auditoria)`,
+        before: {
+          status: existing.status,
+          reviewStatus: existing.reviewStatus,
+          category: existing.category,
+          value: Number(existing.value),
+          reviewNote: existing.reviewNote ?? null,
+        },
+        after: {
+          status: updated.status,
+          reviewStatus: updated.reviewStatus,
+          category: updated.category,
+          value: Number(updated.value),
+          reviewNote: updated.reviewNote ?? null,
+        },
       });
+      return updated;
     });
-    res.json({ ok: true });
+    res.json({ ok: true, expense: serializeExpense(expense, true) });
   } catch (e) {
     next(e);
   }
-});
+}
+
+router.post('/:id/cancel', cancelExpense);
+// Mantido por compatibilidade com clientes antigos: DELETE agora cancela, nunca exclui.
+router.delete('/:id', cancelExpense);
 
 module.exports = router;

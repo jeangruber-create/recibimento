@@ -12,8 +12,8 @@ function showVersionBadge() {
 }
 
 // ============ VERSAO DO SISTEMA ============
-const APP_VERSION = '2026-11-25-v28';
-const APP_BUILD = 'escopo-congregacao-unica';
+const APP_VERSION = '2026-11-25-v29';
+const APP_BUILD = 'despesa-cancelada-auditoria';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
@@ -260,7 +260,20 @@ const Storage = {
   saveClosure(c) { const arr = this.getClosures(); arr.push(c); this.set('adm_closures', arr) },
   getExpenses() { return this.get('adm_expenses', []) },
   saveExpense(e) { const arr = this.getExpenses(); arr.push(e); this.set('adm_expenses', arr) },
-  deleteExpense(id) { this.set('adm_expenses', this.getExpenses().filter(e => String(e.id) !== String(id))) },
+  // Cancelamento lógico: o lançamento permanece como CANCELADO para auditoria.
+  cancelExpense(id, note) {
+    const reason = (note || '').trim() || 'Cancelada pelo tesoureiro';
+    this.set('adm_expenses', this.getExpenses().map(e => String(e.id) === String(id)
+      ? {
+          ...e,
+          status: 'voided',
+          reviewStatus: 'voided',
+          reviewNote: e.reviewNote ? e.reviewNote + ' • ' + reason : reason,
+          canceledAt: new Date().toISOString(),
+          canceledBy: (typeof currentUser !== 'undefined' && currentUser?.name) || '',
+        }
+      : e));
+  },
   // Fechamentos semanais (congregação/setor) e alertas de extrapolo
   getWeekClosures() { return this.get('adm_week_closures', []) },
   saveWeekClosure(c) {
@@ -536,7 +549,7 @@ function mapExpense(e) {
 function expenseReviewState(e) {
   const st = (e && e.status) || 'approved';
   const rs = (e && e.reviewStatus) || 'approved';
-  if (st === 'voided' || rs === 'voided') return 'voided';
+  if (['voided', 'canceled'].includes(st) || ['voided', 'canceled'].includes(rs)) return 'voided';
   if (st === 'rejected' || rs === 'rejected') return 'rejected';
   if (rs === 'flagged') return 'flagged';
   if (st === 'pending' || rs === 'pending') return 'pending';
@@ -554,7 +567,7 @@ function expenseReviewBadge(e) {
   if (s === 'pending') return '<span style="background:var(--gold,#D4A843); color:#1A1A1A; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">Aguardando aprovação do setor</span>';
   if (s === 'flagged') return '<span style="background:#fff3cd; color:#8a6d3b; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">Sinalizada pelo setor</span>';
   if (s === 'rejected') return '<span style="background:var(--error); color:white; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">Rejeitada pelo setor</span>';
-  if (s === 'voided') return '<span style="background:#ccc; color:#333; padding:2px 8px; border-radius:10px; font-size:11px;">Anulada</span>';
+  if (s === 'voided') return '<span style="background:#6b7280; color:#fff; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">Cancelada</span>';
   if (s === 'paid') return '<span style="background:var(--success); color:white; padding:2px 8px; border-radius:10px; font-size:11px;">Paga</span>';
   return '<span style="background:var(--success); color:white; padding:2px 8px; border-radius:10px; font-size:11px;">Aprovada</span>';
 }
@@ -563,12 +576,21 @@ function canReviewExpenses(user) {
   return !!user && (user.role === 'sede' || user.role === 'tesoureiro_setor');
 }
 
+// Canceladas continuam visíveis, mas não são pendência nem gasto realizado.
+function isCanceledExpense(e) {
+  return expenseReviewState(e) === 'voided';
+}
+function countableExpenses(list) {
+  return (list || []).filter(e => !['voided', 'rejected'].includes(expenseReviewState(e)));
+}
+
 // Despesas da semana que ainda dependem de aprovação do setor.
 function pendingExpensesInWeek(scopeFilter, week) {
   const { start, end } = weekBounds(weekStartDate(week));
   return Storage.getExpenses().filter(e => {
     const t = new Date(e.date).getTime();
-    return t >= start.getTime() && t <= end.getTime() && scopeFilter(e) && !isExpenseApproved(e);
+    return t >= start.getTime() && t <= end.getTime() && scopeFilter(e)
+      && !isCanceledExpense(e) && !isExpenseApproved(e);
   });
 }
 
@@ -4017,7 +4039,7 @@ function renderDayPanel() {
   const showExp = canViewExpenses(currentUser);
   document.querySelectorAll('.day-expense-item').forEach(el => { el.style.display = showExp ? 'block' : 'none'; });
   if (showExp) {
-    const expTotal = getScopedExpenses().filter(e => {
+    const expTotal = countableExpenses(getScopedExpenses()).filter(e => {
       const t = new Date(e.date).getTime();
       return t >= start.getTime() && t <= end.getTime();
     }).reduce((s, e) => s + e.value, 0);
@@ -4116,14 +4138,14 @@ function renderWeeklyCloseRaw() {
   const expenses = getScopedExpenses().filter(e => inRange(e.date));
 
   const income = receipts.reduce((s, r) => s + r.value, 0);
-  const expenseTotal = expenses.reduce((s, e) => s + e.value, 0);
+  const expenseTotal = countableExpenses(expenses).reduce((s, e) => s + e.value, 0);
 
   $('wkIncome').textContent = fmtMoney(income);
   $('wkCount').textContent = receipts.length;
   $('wkTotalIncome').textContent = fmtMoney(income);
   $('wkTotalExpense').textContent = fmtMoney(expenseTotal);
   $('wkBalance').textContent = fmtMoney(income - expenseTotal);
-  $('wkExpCount').textContent = expenses.length;
+  $('wkExpCount').textContent = countableExpenses(expenses).length;
 
   const byType = receipts.reduce((acc, r) => { acc[r.type] = (acc[r.type] || 0) + r.value; return acc; }, {});
   $('wkByType').innerHTML = Object.keys(byType).length
@@ -4293,6 +4315,7 @@ function renderExpenseList(expenses) {
     const cong = sec?.congregations.find(c => c.id === e.congregationId);
     const local = cong ? `${String(sec.id).padStart(2,'0')}/${cong.code}` : (sec ? `Setor ${String(sec.id).padStart(2,'0')}` : '');
     const state = expenseReviewState(e);
+    const canceled = state === 'voided';
     const needsReview = state === 'pending' || state === 'flagged' || state === 'rejected';
     let reviewActions = '';
     if (reviewer && needsReview) {
@@ -4303,7 +4326,10 @@ function renderExpenseList(expenses) {
     } else if (isCong && needsReview) {
       reviewActions = `<div style="margin-top:6px; font-size:11px; color:var(--accent-dark); font-weight:600;">Aguardando aprovação do setor — você não pode aprovar as próprias contas.</div>`;
     }
-    const note = e.reviewNote ? `<div class="list-item-sub" style="color:var(--text-muted);"><strong>Obs. do setor:</strong> ${esc(e.reviewNote)}</div>` : '';
+    const note = e.reviewNote ? `<div class="list-item-sub" style="color:var(--text-muted);"><strong>${canceled ? 'Motivo do cancelamento:' : 'Obs. do setor:'}</strong> ${esc(e.reviewNote)}</div>` : '';
+    const cancelButton = canceled
+      ? '<span style="font-size:11px; color:var(--text-muted); white-space:nowrap;">Registro mantido</span>'
+      : `<button class="btn btn-ghost" style="padding:6px 10px; font-size:12px; color:var(--error);" onclick="cancelExpenseItem('${e.id}')">Cancelar</button>`;
     return `
       <div class="list-item" style="align-items:flex-start;">
         <div class="list-item-info">
@@ -4313,8 +4339,8 @@ function renderExpenseList(expenses) {
           ${e.comprovante ? `<button class="btn btn-ghost" style="padding:2px 8px; font-size:11px; color:var(--primary);" onclick="viewComprovante('${e.id}')">📎 Comprovante</button>` : ''}
           ${reviewActions}
         </div>
-        <span class="list-item-badge" style="background:var(--error); color:white;">${fmtMoney(e.value)}</span>
-        <button class="btn btn-ghost" style="padding:8px; color:var(--error);" onclick="deleteExpenseItem('${e.id}')">✕</button>
+        <span class="list-item-badge" style="background:${canceled ? '#9ca3af' : 'var(--error)'}; color:white;">${fmtMoney(e.value)}</span>
+        ${cancelButton}
       </div>`;
   }).join('');
 }
@@ -4419,20 +4445,30 @@ $('expComprovante')?.addEventListener('change', (e) => {
   handleComprovanteFile(e.target.files && e.target.files[0]);
 });
 
-function deleteExpenseItem(id) {
+function cancelExpenseItem(id) {
   const exp = Storage.getExpenses().find(e => String(e.id) === String(id));
   if (!exp) return;
-  showModal('Excluir Despesa', `Excluir despesa "${exp.category}" de ${fmtMoney(exp.value)}?`, async () => {
+  if (isCanceledExpense(exp)) return showToast('Esta despesa já está cancelada', 'warning');
+  showModal('Cancelar Despesa', `Cancelar despesa "${exp.category}" de ${fmtMoney(exp.value)}? O lançamento será mantido como CANCELADO para auditoria.`, async () => {
+    let note = '';
+    try { note = window.prompt('Motivo do cancelamento (opcional):') || ''; } catch (e) { note = ''; }
     if (HAS_FETCH_MODE()) {
       try {
-        await Api.del('/api/expenses/' + encodeURIComponent(id));
+        const out = await Api.post('/api/expenses/' + encodeURIComponent(id) + '/cancel', { note: note || null });
+        const mapped = mapExpense(out.expense);
+        const arr = Storage.getExpenses().filter(x => String(x.id) !== String(mapped.id));
+        arr.push(mapped);
+        Storage.set('adm_expenses', arr);
       } catch (e) {
-        if (e.status !== 404) return apiErrorToast(e);
+        return apiErrorToast(e);
       }
+    } else {
+      Storage.cancelExpense(id, note);
     }
-    Storage.deleteExpense(id);
-    showToast('Despesa excluída', 'success');
+    showToast('Despesa cancelada e mantida para auditoria', 'success');
     renderWeeklyClose();
+    if ($('screenFinanceControl')?.classList.contains('active')) renderFinanceControl();
+    if ($('screenDashboard')?.classList.contains('active')) renderDashboard();
   });
 }
 
@@ -4484,7 +4520,7 @@ function exportWeeklyExcel() {
   const receipts = confirmedOnly(getScopedReceipts()).filter(r => inRange(r.date));
   const expenses = getScopedExpenses().filter(e => inRange(e.date));
   const income = receipts.reduce((s, r) => s + r.value, 0);
-  const expenseTotal = expenses.reduce((s, e) => s + e.value, 0);
+  const expenseTotal = countableExpenses(expenses).reduce((s, e) => s + e.value, 0);
   const periodStr = `${start.toLocaleDateString('pt-BR')} a ${end.toLocaleDateString('pt-BR')}`;
 
   const wb = XLSX.utils.book_new();
@@ -4502,20 +4538,21 @@ function exportWeeklyExcel() {
   XLSX.utils.book_append_sheet(wb, wsRec, 'Receitas');
 
   // Despesas
-  const expHeader = ['Data', 'Categoria', 'Descrição', 'Setor', 'Congregação', 'Valor (R$)'];
+  const expHeader = ['Data', 'Categoria', 'Descrição', 'Setor', 'Congregação', 'Valor (R$)', 'Situação'];
   const expRows = expenses.map(e => {
     const s = sectorsData.find(x => x.id === e.sectorId);
     const c = s?.congregations.find(x => x.id === e.congregationId);
     return [fmtDate(new Date(e.date)), e.category, e.description || '',
-      s ? `${String(s.id).padStart(2,'0')} - ${s.name}` : '', c ? `${c.code} - ${c.name}` : '', e.value];
+      s ? `${String(s.id).padStart(2,'0')} - ${s.name}` : '', c ? `${c.code} - ${c.name}` : '', e.value,
+      isCanceledExpense(e) ? 'Cancelada' : expenseReviewState(e)];
   });
   const wsExp = XLSX.utils.aoa_to_sheet([expHeader, ...expRows]);
-  wsExp['!cols'] = [{wch:12},{wch:14},{wch:30},{wch:20},{wch:22},{wch:12}];
+  wsExp['!cols'] = [{wch:12},{wch:14},{wch:30},{wch:20},{wch:22},{wch:12},{wch:14}];
   XLSX.utils.book_append_sheet(wb, wsExp, 'Despesas');
 
   // Resumo
   const byType = receipts.reduce((acc, r) => { acc[r.type] = (acc[r.type] || 0) + r.value; return acc; }, {});
-  const byCat = expenses.reduce((acc, e) => { acc[e.category] = (acc[e.category] || 0) + e.value; return acc; }, {});
+  const byCat = countableExpenses(expenses).reduce((acc, e) => { acc[e.category] = (acc[e.category] || 0) + e.value; return acc; }, {});
   const ratio = income > 0 ? expenseTotal / income : (expenseTotal > 0 ? 1 : 0);
   const exceeded = expenseTotal > income * EXPENSE_LIMIT_RATIO;
   const resRows = [
@@ -4556,7 +4593,7 @@ function printWeekly() {
   const receipts = confirmedOnly(getScopedReceipts()).filter(r => inRange(r.date));
   const expenses = getScopedExpenses().filter(e => inRange(e.date));
   const income = receipts.reduce((s, r) => s + r.value, 0);
-  const expenseTotal = expenses.reduce((s, e) => s + e.value, 0);
+  const expenseTotal = countableExpenses(expenses).reduce((s, e) => s + e.value, 0);
   const byType = receipts.reduce((acc, r) => { acc[r.type] = (acc[r.type] || 0) + r.value; return acc; }, {});
 
   const w = window.open('', '_blank');
@@ -4591,9 +4628,9 @@ function printWeekly() {
 
     <h2>Despesas</h2>
     <table>
-      <thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th class="right">Valor</th></tr></thead>
+      <thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Situação</th><th class="right">Valor</th></tr></thead>
       <tbody>
-        ${expenses.map(e => `<tr><td>${fmtDate(new Date(e.date))}</td><td>${e.category}</td><td>${e.description || ''}</td><td class="right">${fmtMoney(e.value)}</td></tr>`).join('') || '<tr><td colspan="4">Sem despesas</td></tr>'}
+        ${expenses.map(e => `<tr><td>${fmtDate(new Date(e.date))}</td><td>${e.category}</td><td>${e.description || ''}</td><td>${isCanceledExpense(e) ? 'Cancelada' : expenseReviewState(e)}</td><td class="right">${fmtMoney(e.value)}</td></tr>`).join('') || '<tr><td colspan="5">Sem despesas</td></tr>'}
       </tbody>
     </table>
     <div class="total">TOTAL DESPESAS: ${fmtMoney(expenseTotal)}</div>
@@ -4749,12 +4786,13 @@ function renderDashExpenses(expenses, incomeTotal) {
   if (!canViewExpenses(currentUser)) { card.style.display = 'none'; return; }
   card.style.display = 'block';
 
-  const total = expenses.reduce((s,e) => s + e.value, 0);
+  const counted = countableExpenses(expenses);
+  const total = counted.reduce((s,e) => s + e.value, 0);
   $('kpiExpTotal').textContent = fmtMoney(total);
-  $('kpiExpCount').textContent = expenses.length;
+  $('kpiExpCount').textContent = counted.length;
   $('kpiBalance').textContent = fmtMoney(incomeTotal - total);
 
-  renderBarChart('chartExpByCat', groupBy(expenses, e => e.category));
+  renderBarChart('chartExpByCat', groupBy(counted, e => e.category));
 
   const list = $('dashExpenses');
   if (!expenses.length) {
@@ -4768,10 +4806,10 @@ function renderDashExpenses(expenses, incomeTotal) {
     return `
       <div class="list-item">
         <div class="list-item-info">
-          <div class="list-item-title">${e.category}${e.description ? ' — ' + e.description : ''}</div>
-          <div class="list-item-sub">${fmtDate(new Date(e.date))} • ${s ? String(s.id).padStart(2,'0') : '?'}/${c ? c.code : '?'}${e.createdBy ? ' • ' + e.createdBy : ''}</div>
+          <div class="list-item-title">${e.category}${e.description ? ' — ' + e.description : ''} ${expenseReviewBadge(e)}</div>
+          <div class="list-item-sub">${fmtDate(new Date(e.date))} • ${s ? String(s.id).padStart(2,'0') : '?'}/${c ? c.code : '?'}${e.createdBy ? ' • ' + e.createdBy : ''}${isCanceledExpense(e) && e.reviewNote ? ' • ' + esc(e.reviewNote) : ''}</div>
         </div>
-        <span class="list-item-badge" style="background:var(--error); color:white;">${fmtMoney(e.value)}</span>
+        <span class="list-item-badge" style="background:${isCanceledExpense(e) ? '#9ca3af' : 'var(--error)'}; color:white;">${fmtMoney(e.value)}</span>
       </div>`;
   }).join('') + (expenses.length > 50 ? `<div style="text-align:center; font-size:12px; color:var(--text-muted); padding:10px;">Mostrando 50 de ${expenses.length}.</div>` : '');
 }
@@ -5396,16 +5434,17 @@ function exportDashboardExcel() {
 
   // Aba de Despesas (quando o perfil tem visibilidade)
   if (canViewExpenses(currentUser)) {
-    const expHeader = ['Data', 'Categoria', 'Descrição', 'Valor (R$)', 'Setor', 'Congregação', 'Registrado por'];
+    const expHeader = ['Data', 'Categoria', 'Descrição', 'Valor (R$)', 'Setor', 'Congregação', 'Registrado por', 'Situação'];
     const expRows = expenses.map(e => {
       const s = sectorsData.find(x => x.id === e.sectorId);
       const c = s?.congregations.find(x => x.id === e.congregationId);
       return [fmtDate(new Date(e.date)), e.category, e.description || '', e.value,
         s ? `${String(s.id).padStart(2,'0')} - ${s.name}` : String(e.sectorId || ''),
-        c ? `${c.code} - ${c.name}` : String(e.congregationId || ''), e.createdBy || ''];
+        c ? `${c.code} - ${c.name}` : String(e.congregationId || ''), e.createdBy || '',
+        isCanceledExpense(e) ? 'Cancelada' : expenseReviewState(e)];
     });
     const wsExp = XLSX.utils.aoa_to_sheet([expHeader, ...expRows]);
-    wsExp['!cols'] = [{wch:12},{wch:14},{wch:30},{wch:14},{wch:22},{wch:25},{wch:20}];
+    wsExp['!cols'] = [{wch:12},{wch:14},{wch:30},{wch:14},{wch:22},{wch:25},{wch:20},{wch:14}];
     XLSX.utils.book_append_sheet(wb, wsExp, 'Despesas');
   }
 
@@ -5421,9 +5460,10 @@ function exportDashboardSummaryExcel() {
   if (filtered.length === 0 && expenses.length === 0) return showToast('Nenhum dado para exportar', 'warning');
 
   const total = filtered.reduce((s,r) => s + r.value, 0);
-  const expTotal = expenses.reduce((s,e) => s + e.value, 0);
+  const countedExpenses = countableExpenses(expenses);
+  const expTotal = countedExpenses.reduce((s,e) => s + e.value, 0);
   const byType = groupBy(filtered, r => r.type);
-  const byExpCat = groupBy(expenses, e => e.category);
+  const byExpCat = groupBy(countedExpenses, e => e.category);
   const bySector = groupBy(filtered, r => {
     const s = sectorsData.find(x => x.id === r.sectorId);
     return s ? `${String(s.id).padStart(2,'0')} - ${s.name}` : `Setor ${r.sectorId}`;
@@ -5438,7 +5478,7 @@ function exportDashboardSummaryExcel() {
     ['TOTAL RECEBIDO', filtered.length, total],
     (() => { const mr = filtered.filter(r => r.source === 'membro'); return ['↳ Dízimos/ofertas de casa (membros)', mr.length, mr.reduce((s,r)=>s+r.value,0)]; })(),
     ...(canViewExpenses(currentUser) ? [
-      ['TOTAL DESPESAS', expenses.length, expTotal],
+      ['TOTAL DESPESAS', countedExpenses.length, expTotal],
       ['SALDO (Recebido - Despesas)', '', total - expTotal]
     ] : []),
     [],
@@ -5447,7 +5487,7 @@ function exportDashboardSummaryExcel() {
     ...(canViewExpenses(currentUser) ? [
       [],
       ['DESPESAS POR CATEGORIA', 'Qtd', 'Valor'],
-      ...Object.entries(byExpCat).sort((a,b)=>b[1]-a[1]).map(([c,v]) => [c, expenses.filter(e=>e.category===c).length, v])
+      ...Object.entries(byExpCat).sort((a,b)=>b[1]-a[1]).map(([c,v]) => [c, countedExpenses.filter(e=>e.category===c).length, v])
     ] : []),
     [],
     ['POR SETOR', 'Qtd', 'Valor'],
@@ -5470,7 +5510,8 @@ function printDashboard() {
   if (filtered.length === 0 && expenses.length === 0) return showToast('Nenhum dado para imprimir', 'warning');
 
   const total = filtered.reduce((s,r) => s + r.value, 0);
-  const expTotal = expenses.reduce((s,e) => s + e.value, 0);
+  const countedExpenses = countableExpenses(expenses);
+  const expTotal = countedExpenses.reduce((s,e) => s + e.value, 0);
   const byType = groupBy(filtered, r => r.type);
   const w = window.open('', '_blank');
   w.document.write(`
@@ -5521,13 +5562,13 @@ function printDashboard() {
     ${showExp ? `
     <h2>Despesas do Período</h2>
     <table>
-      <thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Setor/Cong</th><th class="right">Valor</th></tr></thead>
+      <thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Setor/Cong</th><th>Situação</th><th class="right">Valor</th></tr></thead>
       <tbody>
         ${expenses.map(e => {
           const s = sectorsData.find(x => x.id === e.sectorId);
           const c = s?.congregations.find(x => x.id === e.congregationId);
-          return `<tr><td>${fmtDate(new Date(e.date))}</td><td>${e.category}</td><td>${e.description||''}</td><td>${s?String(s.id).padStart(2,'0'):''}/${c?c.code:''}</td><td class="right exp">${fmtMoney(e.value)}</td></tr>`;
-        }).join('') || '<tr><td colspan="5">Sem despesas no período</td></tr>'}
+          return `<tr><td>${fmtDate(new Date(e.date))}</td><td>${e.category}</td><td>${e.description||''}</td><td>${s?String(s.id).padStart(2,'0'):''}/${c?c.code:''}</td><td>${isCanceledExpense(e) ? 'Cancelada' : expenseReviewState(e)}</td><td class="right exp">${fmtMoney(e.value)}</td></tr>`;
+        }).join('') || '<tr><td colspan="6">Sem despesas no período</td></tr>'}
       </tbody>
     </table>
     <div class="total exp">TOTAL DESPESAS: ${fmtMoney(expTotal)}</div>
@@ -5587,7 +5628,7 @@ function weekSumsFor(scopeFilter, anyDateInWeek) {
   const { start, end } = weekBounds(weekStartDate(anyDateInWeek));
   const inR = (d) => { const t = new Date(d).getTime(); return t >= start.getTime() && t <= end.getTime(); };
   const income = confirmedOnly(Storage.getReceipts().filter(r => inR(r.date) && scopeFilter(r))).reduce((s, r) => s + r.value, 0);
-  const expense = Storage.getExpenses().filter(e => inR(e.date) && scopeFilter(e)).reduce((s, e) => s + e.value, 0);
+  const expense = countableExpenses(Storage.getExpenses().filter(e => inR(e.date) && scopeFilter(e))).reduce((s, e) => s + e.value, 0);
   const ratio = income > 0 ? expense / income : (expense > 0 ? 1 : 0);
   return { income, expense, balance: income - expense, ratio, exceeded: expense > income * EXPENSE_LIMIT_RATIO };
 }
@@ -6598,7 +6639,7 @@ function prestacaoComputed(sectorId, anyDateInWeek) {
   const { start, end } = weekBounds(weekStartDate(anyDateInWeek));
   const inR = (d) => { const t = new Date(d).getTime(); return t >= start.getTime() && t <= end.getTime(); };
   const recs = confirmedOnly(Storage.getReceipts().filter(r => inR(r.date) && r.sectorId === sectorId));
-  const exps = Storage.getExpenses().filter(e => inR(e.date) && e.sectorId === sectorId);
+  const exps = countableExpenses(Storage.getExpenses().filter(e => inR(e.date) && e.sectorId === sectorId));
   const incomeBy = sumByPayment(recs, receiptPayment);
   const expenseBy = sumByPayment(exps, expensePayment);
   const income = sumValues(incomeBy);
