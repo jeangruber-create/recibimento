@@ -12,8 +12,8 @@ function showVersionBadge() {
 }
 
 // ============ VERSAO DO SISTEMA ============
-const APP_VERSION = '2026-11-25-v27';
-const APP_BUILD = 'fechamento-culto-dia';
+const APP_VERSION = '2026-11-25-v28';
+const APP_BUILD = 'escopo-congregacao-unica';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
@@ -3268,11 +3268,11 @@ function fillSectorSelect() {
 
 function fillCongSelect() {
   const secId = parseInt($('userRegSector').value);
-  const sec = sectorsData.find(s => s.id === secId);
   const sel = $('userRegCong');
-  const congs = sec ? sec.congregations : [];
-  sel.innerHTML = congs.map(c => `<option value="${c.id}">${c.code} — ${c.name}</option>`).join('');
-  // tesoureiro_congregacao tem congregação fixa
+  const congs = getManageableCongregations(currentUser)
+    .filter(c => !secId || c.sectorId === secId);
+  sel.innerHTML = congs.map(c => `<option value="${c.id}">${esc(c.code)} — ${esc(c.name)}</option>`).join('');
+  // tesoureiro_congregacao tem congregação fixa, conforme cadastro do usuário
   sel.disabled = currentUser.role === 'tesoureiro_congregacao';
   if (currentUser.role === 'tesoureiro_congregacao') sel.value = String(currentUser.congregationId);
 }
@@ -7766,16 +7766,27 @@ function _finQS(){
 }
 function _finPopulatePayableScope(){
   var ss = $('paySector'), cs = $('payCong');
-  if (!ss || !cs || ss.dataset.ready === '1') return;
-  var sectors = (typeof getManageableSectors === 'function') ? getManageableSectors(currentUser) : (typeof sectorsData !== 'undefined' ? sectorsData : []);
-  ss.innerHTML = sectors.map(function(s){ return '<option value="'+s.id+'">'+esc(s.name)+'</option>'; }).join('') || '<option value="">Selecione setor</option>';
+  if (!ss || !cs) return;
+  var role = currentUser?.role;
+  var scopeKey = [role, currentUser?.sectorId, currentUser?.congregationId].join(':');
+  if (ss.dataset.scope === scopeKey) return;
+  var fixedSector = role !== 'sede';
+  var fixedCong = role === 'tesoureiro_congregacao';
+  var sectors = getManageableSectors(currentUser);
+  var congs = getManageableCongregations(currentUser);
+  ss.innerHTML = (fixedSector ? '' : '<option value="">Selecione setor</option>') +
+    sectors.map(function(s){ return '<option value="'+s.id+'">'+esc(s.name || ('Setor '+s.id))+'</option>'; }).join('');
+  if (fixedSector && currentUser?.sectorId != null) ss.value = String(currentUser.sectorId);
+  ss.disabled = fixedSector;
   function fillCongs(){
-    var sid = Number(ss.value);
-    var sec = sectors.filter(function(s){ return Number(s.id)===sid; })[0];
-    var congs = (sec && sec.congregations) ? sec.congregations : [];
-    cs.innerHTML = congs.map(function(c){ return '<option value="'+c.id+'">'+esc(c.name || c.code || ('#'+c.id))+'</option>'; }).join('') || '<option value="">Selecione congregação</option>';
+    var sid = ss.value;
+    var list = congs.filter(function(c){ return !sid || String(c.sectorId) === String(sid); });
+    cs.innerHTML = (fixedCong ? '' : '<option value="">Selecione congregação</option>') +
+      list.map(function(c){ return '<option value="'+c.id+'">'+esc(c.code ? c.code + ' — ' + (c.name || '') : (c.name || ('#'+c.id)))+'</option>'; }).join('');
+    if (fixedCong) cs.value = String(currentUser?.congregationId ?? '');
+    cs.disabled = fixedCong;
   }
-  ss.onchange = fillCongs; fillCongs(); ss.dataset.ready = '1';
+  ss.onchange = fillCongs; fillCongs(); ss.dataset.scope = scopeKey;
 }
 
 async function renderFinanceControl() {
@@ -7878,7 +7889,7 @@ function togglePayableForm(){
   var w=$('payableFormWrap'); if(!w) return;
   var show = w.style.display==='none';
   w.style.display = show ? 'block' : 'none';
-  if (show) { var ss=$('paySector'); if(ss) ss.dataset.ready=''; _finPopulatePayableScope(); }
+  if (show) { var ss=$('paySector'); if(ss) ss.dataset.scope=''; _finPopulatePayableScope(); }
 }
 
 async function createPayable(){
@@ -7888,6 +7899,11 @@ async function createPayable(){
   var dueDate = (($('payDue')||{}).value||'').trim();
   var sectorId = Number(($('paySector')||{}).value);
   var congregationId = Number(($('payCong')||{}).value);
+  // A congregação só pode lançar no próprio vínculo, independente do DOM.
+  if (currentUser?.role === 'tesoureiro_congregacao') {
+    sectorId = currentUser.sectorId;
+    congregationId = currentUser.congregationId;
+  }
   if (!category || !(amount>0) || !dueDate || !sectorId || !congregationId) { showToast('Preencha categoria, valor, vencimento, setor e congregação', 'error'); return; }
   try {
     await Api.post('/api/payables', {
@@ -8135,16 +8151,10 @@ function applyConsultasPeriod(){
 }
 function fillConsultasCongs(){
   var ss=$('cqSector'), cs=$('cqCong'); if(!ss||!cs) return;
-  var sectors = (typeof getManageableSectors === 'function') ? getManageableSectors(currentUser) : ((typeof sectorsData !== 'undefined' && sectorsData) ? sectorsData : []);
   var sid = ss.value;
-  var sec = sid ? sectors.filter(function(s){ return String(s.id)===String(sid); })[0] : null;
-  var congs = sec ? (sec.congregations||[]) : [];
-  // if no sector selected and user is setor-tesoureiro, show their sector congs? keep "Todas"
-  if (!sec && currentUser && currentUser.role === 'tesoureiro_congregacao') {
-    sec = sectors.filter(function(s){ return String(s.id)===String(currentUser.sectorId); })[0];
-    congs = sec ? (sec.congregations||[]).filter(function(c){ return String(c.id)===String(currentUser.congregationId); }) : [];
-  }
-  cs.innerHTML = '<option value="">Todas (no meu acesso)</option>' + congs.map(function(c){ return '<option value="'+c.id+'">'+esc(c.name||c.code||('#'+c.id))+'</option>'; }).join('');
+  var congs = getManageableCongregations(currentUser)
+    .filter(function(c){ return !sid || String(c.sectorId)===String(sid); });
+  cs.innerHTML = '<option value="">Todas (no meu acesso)</option>' + congs.map(function(c){ return '<option value="'+c.id+'">'+esc(c.code ? c.code + ' — ' + (c.name||'') : (c.name||('#'+c.id)))+'</option>'; }).join('');
 }
 function _populateConsultasScope(){
   var ss=$('cqSector'), cs=$('cqCong'); if(!ss||!cs) return;
