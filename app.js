@@ -12,8 +12,8 @@ function showVersionBadge() {
 }
 
 // ============ VERSAO DO SISTEMA ============
-const APP_VERSION = '2026-11-24-v26';
-const APP_BUILD = 'whatsapp-thanks-queue';
+const APP_VERSION = '2026-11-25-v27';
+const APP_BUILD = 'fechamento-culto-dia';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
@@ -89,7 +89,7 @@ const ROLE_MODULE = {
   tesoureiro_congregacao: {
     label: 'Tesouraria da Congregação',
     title: 'Cuidar do movimento da congregação',
-    purpose: 'Registre recebimentos, acompanhe o dia, lance despesas e feche a semana. As despesas precisam da aprovação do setor.',
+    purpose: 'Registre recebimentos, acompanhe o dia, feche o culto e, ao fim da semana, envie o movimento ao setor. As despesas precisam da aprovação do setor.',
     color: '#1B3A5C',
     actions: [
       { icon: '➕', label: 'Novo recebimento', desc: 'Registrar um dízimo ou oferta', screen: 'screenNewReceipt', handler: 'startCollection', primary: true },
@@ -100,6 +100,7 @@ const ROLE_MODULE = {
     ],
     steps: [
       'Registre os recebimentos do culto.',
+      'Acompanhe o dia e feche o culto ao terminar.',
       'Lance as despesas da semana com comprovante.',
       'Aguarde o setor aprovar as despesas pendentes.',
       'Feche a semana e envie ao setor.',
@@ -208,6 +209,7 @@ let selectedCongregation = null;
 let currentReceipt = { person: null, type: '', value: 0 };
 let lastReceipt = null;
 let serviceReceipts = [];
+let serviceCloseReturnScreen = 'screenDay';
 let recognition = null;
 
 // ============ UTILS ============
@@ -2606,6 +2608,16 @@ function currentCongregationClosure() {
   return getClosureFor('congregacao', u.sectorId, u.congregationId, new Date());
 }
 
+// Fechamento do culto registrado no aparelho para a congregação do usuário.
+function congregationServiceClosureToday() {
+  const u = currentUser;
+  if (!u || !u.congregationId) return null;
+  const today = dateKey(new Date());
+  return Storage.getClosures().find(c =>
+    String(c.congregationId) === String(u.congregationId) && dateKey(c.date) === today
+  ) || null;
+}
+
 // Coleta bloqueada depois que a congregação fecha o movimento da semana
 // (ou registra o fechamento do culto no mesmo aparelho).
 function isCollectionLocked() {
@@ -2613,10 +2625,7 @@ function isCollectionLocked() {
   if (!u) return false;
   if (u.role !== 'coletor' && u.role !== 'tesoureiro_congregacao') return false;
   if (currentCongregationClosure()) return true;
-  const today = dateKey(new Date());
-  return Storage.getClosures().some(c =>
-    c.congregationId === u.congregationId && dateKey(c.date) === today
-  );
+  return !!congregationServiceClosureToday();
 }
 
 // Recebimentos de hoje no escopo do perfil (coletor vê os próprios).
@@ -2734,7 +2743,9 @@ async function renderModuleStatus(u) {
         <div class="module-kpi"><div class="module-kpi-label">Lançamentos</div><div class="module-kpi-value">${list.length}</div></div>
       </div>
       <div class="module-note">${locked
-        ? 'A congregação já fechou o movimento. Você ainda pode consultar o movimento do dia.'
+        ? (currentCongregationClosure()
+          ? 'A congregação já fechou o movimento da semana. Você ainda pode consultar o movimento do dia.'
+          : 'O culto de hoje foi fechado. Você ainda pode consultar o movimento; o fechamento da semana continua no Meu módulo.')
         : 'A coleta está liberada. Registre cada dízimo ou oferta e acompanhe o movimento do dia.'}</div>`;
 
     if (u.role === 'tesoureiro_congregacao') {
@@ -2806,7 +2817,6 @@ function renderDayMovement() {
   const total = list.reduce((s, r) => s + r.value, 0);
   const byPay = sumByPayment(list, receiptPayment);
   const isCong = u.role === 'tesoureiro_congregacao';
-  const locked = isCollectionLocked();
 
   hero.innerHTML = `<div class="module-hero" style="background:linear-gradient(135deg, var(--primary), var(--primary-light));">
     <div class="module-kicker">${u.role === 'coletor' ? 'Seus lançamentos' : (isCong ? 'Congregação' : 'Movimento do dia')}</div>
@@ -2837,16 +2847,21 @@ function renderDayMovement() {
   }
 
   if ($('dayClosureCard')) {
+    const weekClosed = !!currentCongregationClosure();
+    const serviceClosed = !!congregationServiceClosureToday();
     let body;
-    if (locked) {
-      body = `<h3 class="card-title" style="color:var(--error);">Movimento fechado</h3>
+    if (weekClosed) {
+      body = `<h3 class="card-title" style="color:var(--error);">Movimento da semana fechado</h3>
         <p style="font-size:14px;">A congregação fechou o movimento desta semana. O dia continua disponível apenas para consulta.</p>`;
+    } else if (serviceClosed) {
+      body = `<h3 class="card-title" style="color:var(--error);">Culto de hoje fechado</h3>
+        <p style="font-size:14px;">O culto de hoje já foi fechado. Os lançamentos continuam disponíveis apenas para consulta. O fechamento da semana fica no Meu módulo.</p>`;
     } else if (isCong) {
       body = `<h3 class="card-title">O que fazer agora</h3>
-        <p style="font-size:14px;">Confira os lançamentos e, ao terminar o culto, feche o movimento da semana para enviar ao setor.</p>
+        <p style="font-size:14px;">Confira os lançamentos e, ao terminar o culto, feche o culto de hoje. O fechamento da semana fica no Meu módulo.</p>
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
           <button type="button" class="btn btn-primary" style="flex:1; min-width:180px;" onclick="navigate('screenNewReceipt')">Novo recebimento</button>
-          <button type="button" class="btn btn-outline" style="flex:1; min-width:180px;" onclick="navigate('screenWeeklyClose')">Fechar a semana</button>
+          <button type="button" class="btn btn-outline" style="flex:1; min-width:180px;" onclick="navigate('screenCloseService')">Fechar culto de hoje</button>
         </div>`;
     } else if (u.role === 'coletor') {
       body = `<h3 class="card-title">Coleta liberada</h3>
@@ -2861,6 +2876,7 @@ function renderDayMovement() {
 }
 
 function navigate(screenId) {
+  const previousScreenId = document.querySelector('.screen.active')?.id || null;
   // Coletor: só coleta e consulta o movimento do dia. Qualquer outro destino é barrado.
   if (currentUser?.role === 'coletor') {
     const allowed = ['screenModule','screenNewReceipt','screenVoiceConfirm','screenPerson','screenConfirm','screenReceipt','screenDay','screenCongregation','screenLogin'];
@@ -2897,7 +2913,10 @@ function navigate(screenId) {
   if (screenId === 'screenDashboard') startDayPanelAutoRefresh();
   else stopDayPanelAutoRefresh();
 
-  if (screenId === 'screenCloseService') renderServiceSummary();
+  if (screenId === 'screenCloseService') {
+    serviceCloseReturnScreen = previousScreenId === 'screenNewReceipt' ? 'screenNewReceipt' : 'screenDay';
+    renderServiceSummary();
+  }
   if (screenId === 'screenCongregation') renderCongregationScreen();
   if (screenId === 'screenModule') renderModuleHome();
   if (screenId === 'screenDay') renderDayMovement();
@@ -2936,29 +2955,44 @@ function navigate(screenId) {
 
 $('btnHome').onclick = goHome;
 
+// Recebimentos do culto de hoje: usa também o que ficou salvo no aparelho,
+// para que o resumo continue correto após recarregar a página.
+function currentServiceReceipts() {
+  const u = currentUser;
+  const today = dateKey(new Date());
+  const byId = new Map();
+  [...Storage.getServiceReceipts(), ...serviceReceipts].forEach(r => {
+    if (!r || !r.date || dateKey(new Date(r.date)) !== today) return;
+    if (u?.congregationId && String(r.congregationId ?? '') !== String(u.congregationId)) return;
+    byId.set(String(r.id ?? r.number ?? Math.random()), r);
+  });
+  return [...byId.values()].sort((a, b) => new Date(a.date) - new Date(b.date));
+}
+
 function renderServiceSummary() {
-  const total = serviceReceipts.reduce((s, r) => s + r.value, 0);
-  const byType = serviceReceipts.reduce((acc, r) => {
+  const serviceList = currentServiceReceipts();
+  const total = serviceList.reduce((s, r) => s + r.value, 0);
+  const byType = serviceList.reduce((acc, r) => {
     acc[r.type] = (acc[r.type] || 0) + r.value;
     return acc;
   }, {});
 
   $('serviceSummary').innerHTML = `
     <div class="confirm-item"><div class="confirm-label">Total Recebido</div><div class="confirm-value amount">${fmtMoney(total)}</div></div>
-    <div class="confirm-item"><div class="confirm-label">Quantidade</div><div class="confirm-value">${serviceReceipts.length}</div></div>
+    <div class="confirm-item"><div class="confirm-label">Quantidade</div><div class="confirm-value">${serviceList.length}</div></div>
     ${Object.entries(byType).map(([type, val]) => `
       <div class="confirm-item"><div class="confirm-label">${type}</div><div class="confirm-value">${fmtMoney(val)}</div></div>
     `).join('')}
   `;
 
   const list = $('serviceReceiptsList');
-  if (serviceReceipts.length === 0) {
+  if (serviceList.length === 0) {
     list.innerHTML = '<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Nenhum recebimento neste culto</div>';
   } else {
-    list.innerHTML = serviceReceipts.map(r => `
+    list.innerHTML = serviceList.map(r => `
       <div class="list-item">
         <div class="list-item-info">
-          <div class="list-item-title">${r.person.name}</div>
+          <div class="list-item-title">${esc(r.person?.name || '—')}</div>
           <div class="list-item-sub">${r.type} • ${fmtDate(new Date(r.date))} ${fmtTime(new Date(r.date))}</div>
         </div>
         <span class="list-item-badge">${fmtMoney(r.value)}</span>
@@ -2968,10 +3002,11 @@ function renderServiceSummary() {
 }
 
 $('btnCloseService').onclick = () => {
-  const total = serviceReceipts.reduce((s,r)=>s+r.value,0);
-  const msg = serviceReceipts.length === 0
+  const list = currentServiceReceipts();
+  const total = list.reduce((s,r)=>s+r.value,0);
+  const msg = list.length === 0
     ? 'Nenhum recebimento registrado neste culto. Confirmar fechamento zerado?'
-    : `Confirmar fechamento do culto com ${serviceReceipts.length} recebimentos (${fmtMoney(total)})?`;
+    : `Confirmar fechamento do culto com ${list.length} recebimentos (${fmtMoney(total)})?`;
   showModal('Fechar Culto', msg, () => {
     // Registra o fechamento (mesmo zerado) para auditoria
     const closure = {
@@ -2982,16 +3017,16 @@ $('btnCloseService').onclick = () => {
       sectorName: selectedSector ? `${String(selectedSector.id).padStart(2,'0')} - ${selectedSector.name}` : '',
       congregationName: selectedCongregation ? `${selectedCongregation.code} - ${selectedCongregation.name}` : '',
       responsible: currentUser?.name || '',
-      count: serviceReceipts.length,
+      count: list.length,
       total: total,
-      receipts: serviceReceipts.slice()
+      receipts: list.slice()
     };
     Storage.saveClosure(closure);
 
-    showToast(serviceReceipts.length === 0 ? 'Culto fechado (zerado).' : 'Culto fechado! Relatório gerado.', 'success');
-    serviceReceipts = [];
+    showToast(list.length === 0 ? 'Culto fechado (zerado).' : 'Culto fechado! Relatório gerado.', 'success');
+    serviceReceipts = serviceReceipts.filter(r => !r.date || dateKey(new Date(r.date)) !== dateKey(new Date()));
     Storage.clearService();
-    navigate('screenNewReceipt');
+    navigate(serviceCloseReturnScreen || 'screenDay');
   });
 };
 
@@ -2999,7 +3034,8 @@ $('btnCloseService').onclick = () => {
 $('btnExportExcel').onclick = exportToExcel;
 
 function exportToExcel() {
-  if (serviceReceipts.length === 0) return showToast('Nenhum recebimento para exportar', 'warning');
+  const list = currentServiceReceipts();
+  if (list.length === 0) return showToast('Nenhum recebimento para exportar', 'warning');
   if (typeof XLSX === 'undefined') return showToast('Biblioteca Excel não carregada. Verifique a internet.', 'error');
 
   const sec = selectedSector;
@@ -3009,7 +3045,7 @@ function exportToExcel() {
 
   // ---- Aba 1: Detalhamento ----
   const detHeader = ['Nº Recibo', 'Data', 'Hora', 'Pessoa', 'Tipo', 'Valor (R$)', 'Setor', 'Congregação', 'Status'];
-  const detRows = serviceReceipts.map(r => {
+  const detRows = list.map(r => {
     const d = new Date(r.date);
     const secId = r.sectorId || sec?.id || '';
     const congId = r.congregationId || cong?.id || '';
@@ -3019,7 +3055,7 @@ function exportToExcel() {
       r.number,
       fmtDate(d),
       fmtTime(d),
-      r.person.name,
+      r.person?.name || '—',
       r.type,
       r.value,
       s ? `${String(s.id).padStart(2,'0')} - ${s.name}` : String(secId),
@@ -3028,8 +3064,8 @@ function exportToExcel() {
     ];
   });
 
-  const total = serviceReceipts.reduce((s, r) => s + r.value, 0);
-  const byType = serviceReceipts.reduce((acc, r) => { acc[r.type] = (acc[r.type]||0) + r.value; return acc; }, {});
+  const total = list.reduce((s, r) => s + r.value, 0);
+  const byType = list.reduce((acc, r) => { acc[r.type] = (acc[r.type]||0) + r.value; return acc; }, {});
 
   // ---- Aba 2: Resumo ----
   const resRows = [
