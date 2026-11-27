@@ -182,6 +182,10 @@ router.get('/resumo', async (req, res, next) => {
     requireAccess(req);
     const q = req.query || {};
     const role = req.user.role;
+    // Isolamento por instância: congregação enxerga só a própria congregação;
+    // setor enxerga só o próprio setor; sede enxerga tudo.
+    const isCongregation = role === 'tesoureiro_congregacao';
+    const canSeeSectorLevel = role === 'sede' || role === 'tesoureiro_setor';
     const range = parseRange(q);
     const toDate = q.to ? new Date(String(q.to)) : new Date();
     const weekStart = resolveWeekStart(toDate);
@@ -239,6 +243,16 @@ router.get('/resumo', async (req, res, next) => {
       ...PENDING_EXPENSE_WHERE,
     };
 
+    // Fechamentos: a congregação só pode consultar os fechamentos da própria
+    // congregação. Fechamento de setor/prestação são instâncias superiores.
+    const closureWhere = isCongregation
+      ? { weekStart, sectorId: req.user.sectorId, congregationId: req.user.congregationId }
+      : { weekStart, ...sectorIdsWhere };
+    const prestacaoWhere = {
+      weekStart,
+      sectorId: canSeeSectorLevel ? { in: sectorIds } : -1,
+    };
+
     const [receipts, expenses, payables, pendingExpenses, closures, prestacoes] = await Promise.all([
       prisma.receipt.findMany({
         where: incomeWhere,
@@ -262,8 +276,8 @@ router.get('/resumo', async (req, res, next) => {
         where: pendingExpenseWhere,
         select: { id: true, value: true, congregationId: true },
       }),
-      prisma.weekClosure.findMany({ where: { weekStart, ...sectorIdsWhere } }),
-      prisma.prestacao.findMany({ where: { weekStart, ...sectorIdsWhere } }),
+      prisma.weekClosure.findMany({ where: closureWhere }),
+      prisma.prestacao.findMany({ where: prestacaoWhere }),
     ]);
 
     const userIds = Array.from(new Set(receipts.map((r) => r.personUserId).filter(Boolean)));
@@ -332,7 +346,8 @@ router.get('/resumo', async (req, res, next) => {
           code: cong.code,
           name: cong.name,
           sectorId: sector.id,
-          sectorName: sector.name,
+          // A congregação nunca recebe o nome do setor (instância superior).
+          sectorName: isCongregation ? '' : sector.name,
           income: congIncome,
           expense: congExpense,
           balance: congIncome - congExpense,
@@ -350,8 +365,9 @@ router.get('/resumo', async (req, res, next) => {
       }
     }
 
+    // Congregação nunca recebe o bloco de acerto setor × sede (instância superior).
     const sectors = [];
-    for (const sector of visibleSectors) {
+    for (const sector of (canSeeSectorLevel ? visibleSectors : [])) {
       const secIncome = sector.congregations.reduce((acc, c) => acc + (incomeByCong.get(c.id) || 0), 0);
       const secExpense = sector.congregations.reduce((acc, c) => acc + (expenseByCong.get(c.id) || 0), 0);
       const secClosures = sector.congregations.map((c) => closureByCong.get(c.id)).filter(Boolean);

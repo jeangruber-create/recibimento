@@ -218,9 +218,18 @@ router.get('/overview', async (req, res, next) => {
     const sectorIds = sectors.map((s) => s.id);
     const congFilter = role === 'tesoureiro_congregacao' ? { congregationId: req.user.congregationId } : {};
 
+    // Tesoureiro de congregação não recebe fechamentos de setor nem prestações:
+    // são dados de instância superior (sigilosos para ele).
+    const closureWhere = role === 'tesoureiro_congregacao'
+      ? { congregationId: req.user.congregationId, weekStart: { gte: firstWeek } }
+      : { sectorId: { in: sectorIds }, weekStart: { gte: firstWeek } };
+    const prestacaoWhere = role === 'tesoureiro_congregacao'
+      ? { sectorId: -1, weekStart: { gte: firstWeek } }
+      : { sectorId: { in: sectorIds }, weekStart: { gte: firstWeek } };
+
     const [closures, prestacoes, receipts, expenses] = await Promise.all([
-      prisma.weekClosure.findMany({ where: { sectorId: { in: sectorIds }, weekStart: { gte: firstWeek } } }),
-      prisma.prestacao.findMany({ where: { sectorId: { in: sectorIds }, weekStart: { gte: firstWeek } } }),
+      prisma.weekClosure.findMany({ where: closureWhere }),
+      prisma.prestacao.findMany({ where: prestacaoWhere }),
       prisma.receipt.findMany({
         where: { sectorId: { in: sectorIds }, ...congFilter, ...CONFIRMED_RECEIPT, date: { gte: firstWeek, lte: lastEnd } },
         select: { sectorId: true, congregationId: true, value: true, date: true },
@@ -282,18 +291,21 @@ router.get('/overview', async (req, res, next) => {
         const closed = congregations.filter((c) => c.status === 'closed').length;
         const validated = congregations.filter((c) => c.status === 'validated').length;
 
+        // O setor não recebe dados da prestação na sede (instância superior).
+        // A conferência da própria prestação continua disponível em /api/prestacoes.
+        const canSeeSedeLevel = role === 'sede';
         return {
           sectorId: sector.id,
           sectorName: sector.name,
           sectorCode: String(sector.id).padStart(2, '0'),
           closure: sectorClosure ? serializeClosure(sectorClosure) : null,
           sectorStatus: sectorClosure ? sectorClosure.status : 'open',
-          prestacao: prestacao ? serializePrestacao(prestacao) : null,
+          prestacao: canSeeSedeLevel && prestacao ? serializePrestacao(prestacao) : null,
           toSede: {
-            prestacaoStatus: prestacao ? prestacao.status : 'open',
-            sentAt: prestacao && prestacao.submittedAt ? prestacao.submittedAt.toISOString() : null,
-            receivedAt: prestacao && prestacao.receivedAt ? prestacao.receivedAt.toISOString() : null,
-            received: !!(prestacao && prestacao.status === 'received'),
+            prestacaoStatus: canSeeSedeLevel && prestacao ? prestacao.status : 'open',
+            sentAt: canSeeSedeLevel && prestacao && prestacao.submittedAt ? prestacao.submittedAt.toISOString() : null,
+            receivedAt: canSeeSedeLevel && prestacao && prestacao.receivedAt ? prestacao.receivedAt.toISOString() : null,
+            received: !!(canSeeSedeLevel && prestacao && prestacao.status === 'received'),
           },
           congregations,
           totals: { congregations: congregations.length, open, closed, validated, pending: open + closed },

@@ -12,8 +12,8 @@ function showVersionBadge() {
 }
 
 // ============ VERSAO DO SISTEMA ============
-const APP_VERSION = '2026-11-27-v31';
-const APP_BUILD = 'consultas-tempo-real';
+const APP_VERSION = '2026-11-27-v32';
+const APP_BUILD = 'isolamento-instancias';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
@@ -798,6 +798,11 @@ async function syncFinancialData() {
 
 async function afterLogin(user) {
   currentUser = { ...user };
+  // Nunca deixe resumos do perfil anterior aparecerem para outro perfil.
+  consultasResumo = null;
+  consultasRowsCache = [];
+  weeklyOverview = null;
+  adminWeeklyData = null;
   Storage.setUser(currentUser);
   $('btnLogout').style.display = 'block';
   if ($('syncBadge')) $('syncBadge').style.display = 'inline-block';
@@ -1799,6 +1804,10 @@ async function logout() {
   selectedSector = null;
   selectedCongregation = null;
   serviceReceipts = [];
+  consultasResumo = null;
+  consultasRowsCache = [];
+  weeklyOverview = null;
+  adminWeeklyData = null;
   Storage.clearUser();
   Storage.clearService();
   $('btnLogout').style.display = 'none';
@@ -5797,15 +5806,19 @@ function overviewCongRow(sec, cong, week) {
 
 function overviewSectorBlock(sec, week) {
   const role = currentUser?.role;
+  const isSede = role === 'sede';
   const wk = week.weekStart;
-  const p = sec.prestacao;
-  const toSedeBadge = p ? statusBadgePrestacao(p.status) : statusBadgePrestacao('open');
+  // O setor não visualiza o andamento da prestação na sede (instância superior).
+  const p = isSede ? sec.prestacao : null;
+  const toSedeHtml = isSede
+    ? `<div style="margin-top:2px;">Setor → sede: ${p ? statusBadgePrestacao(p.status) : statusBadgePrestacao('open')}</div>`
+    : '';
   const allValidated = sec.totals.congregations > 0 && sec.totals.validated === sec.totals.congregations;
   const congRows = (sec.congregations || []).map(cong => overviewCongRow(sec, cong, week)).join('')
     || '<div style="font-size:12px; color:var(--text-muted); padding:6px 0;">Nenhuma congregação no escopo.</div>';
 
   let prestActions = '';
-  if (role === 'sede' && p) {
+  if (isSede && p) {
     const b = (label, color, call) => `<button type="button" class="btn btn-ghost" style="padding:4px 10px; font-size:11px; ${color ? 'color:' + color + ';' : ''}" onclick="${call}">${label}</button>`;
     if (p.status === 'submitted') {
       prestActions = `${b('Aprovar', '', `overviewApprovePrestacao('${p.id}')`)} ${b('Rejeitar', 'var(--error)', `overviewRejectPrestacao('${p.id}')`)}`;
@@ -5836,7 +5849,7 @@ function overviewSectorBlock(sec, week) {
       </div>
       <div style="text-align:right; font-size:11px;">
         <div>Congregação → setor: ${statusBadge(sec.sectorStatus)}</div>
-        <div style="margin-top:2px;">Setor → sede: ${toSedeBadge}</div>
+        ${toSedeHtml}
       </div>
     </div>
     <div style="margin-top:6px;">${congRows}</div>
@@ -5849,7 +5862,20 @@ function overviewSectorBlock(sec, week) {
 
 function overviewWeekBlock(week) {
   const t = week.totals || { open: 0, closed: 0, validated: 0, sectors: 0, sectorsReceived: 0 };
-  const sectorsHtml = (week.sectors || []).map(sec => overviewSectorBlock(sec, week)).join('');
+  const role = currentUser && currentUser.role;
+  const isCong = role === 'tesoureiro_congregacao';
+  const isSede = role === 'sede';
+
+  // Congregação vê somente a própria congregação — sem rótulo/totais de setor.
+  // Setor vê somente o próprio setor — sem movimentação da sede.
+  const rowsHtml = (week.sectors || []).map(sec => {
+    if (isCong) return (sec.congregations || []).map(cong => overviewCongRow(sec, cong, week)).join('');
+    return overviewSectorBlock(sec, week);
+  }).join('') || `<div style="font-size:12px; color:var(--text-muted);">Nenhum registro no seu escopo.</div>`;
+  const sedeCounts = isSede
+    ? `<div style="color:var(--text-muted);">Setores recebidos pela sede: ${t.sectorsReceived}/${t.sectors}</div>`
+    : '';
+
   return `<details ${week.isCurrent ? 'open' : ''} style="border:1px solid var(--border,#e5e7eb); border-radius:10px; padding:10px; margin-bottom:10px; background:#fafafa;">
     <summary style="cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
       <div>
@@ -5859,10 +5885,10 @@ function overviewWeekBlock(week) {
       <div style="text-align:right; font-size:11px;">
         <span style="color:${t.open ? 'var(--gold,#D4A843)' : 'var(--success)'}; font-weight:700;">${t.open} em aberto</span>
         • ${t.closed} fechada(s) • ${t.validated} validada(s)
-        <div style="color:var(--text-muted);">Setores recebidos pela sede: ${t.sectorsReceived}/${t.sectors}</div>
+        ${sedeCounts}
       </div>
     </summary>
-    <div style="margin-top:10px;">${sectorsHtml}</div>
+    <div style="margin-top:10px;">${rowsHtml}</div>
   </details>`;
 }
 
@@ -8326,13 +8352,19 @@ function fillConsultasCongs(){
 }
 function _populateConsultasScope(){
   var ss=$('cqSector'), cs=$('cqCong'); if(!ss||!cs) return;
+  var isCong = !!(currentUser && currentUser.role === 'tesoureiro_congregacao');
+  // Congregação não vê o filtro de setor: só existe a própria congregação.
+  if($('cqSectorGroup')) $('cqSectorGroup').style.display = isCong ? 'none' : '';
   var sectors = (typeof getManageableSectors === 'function') ? getManageableSectors(currentUser) : ((typeof sectorsData !== 'undefined' && sectorsData) ? sectorsData : []);
   ss.innerHTML = '<option value="">Todos (no meu acesso)</option>' + sectors.map(function(s){ return '<option value="'+s.id+'">'+esc(s.name||('Setor '+s.id))+'</option>'; }).join('');
   if (currentUser && currentUser.role === 'tesoureiro_setor' && currentUser.sectorId!=null) ss.value = String(currentUser.sectorId);
   if (currentUser && currentUser.role === 'tesoureiro_congregacao' && currentUser.sectorId!=null) ss.value = String(currentUser.sectorId);
+  // Ao trocar de perfil na mesma sessão, sede/setor não herdam filtros do perfil anterior.
+  if (currentUser && currentUser.role === 'sede') ss.value = '';
   if (!_canPickSector()) ss.disabled = true; else ss.disabled = false;
   fillConsultasCongs();
   if (currentUser && currentUser.role === 'tesoureiro_congregacao' && currentUser.congregationId!=null) cs.value = String(currentUser.congregationId);
+  else cs.value = '';
   if (!_canPickCong()) cs.disabled = true; else cs.disabled = false;
 }
 function renderConsultasScreen(){
@@ -8403,7 +8435,11 @@ function renderConsultasResumo(data){
   var period=(from||to) ? ('Período: '+esc(from||'início')+' a '+esc(to||'hoje')) : '';
 
   if($('cqScopeTitle')) $('cqScopeTitle').textContent=(data.scope&&data.scope.label)||'Resumo do movimento';
-  if($('cqStatusText')) $('cqStatusText').innerHTML='<strong>'+esc((data.overall&&data.overall.label)||'Resumo atualizado')+'</strong> · '+esc((data.week&&data.week.label)||'')+(period?(' · '+period):'')+'<br><span style="font-size:12px;">Atualizado em '+esc(new Date(data.period&&data.period.generatedAt||Date.now()).toLocaleTimeString('pt-BR'))+'. Enquanto a semana está aberta, novos lançamentos entram aqui automaticamente ao atualizar a tela.</span>';
+  if($('cqStatusText')) {
+    var isCong = !!(currentUser && currentUser.role === 'tesoureiro_congregacao');
+    var privacy = isCong ? '<br><span style="font-size:12px; font-weight:700;">Você visualiza somente os dados da sua congregação. Dados do setor e de outras congregações são confidenciais.</span>' : '';
+    $('cqStatusText').innerHTML='<strong>'+esc((data.overall&&data.overall.label)||'Resumo atualizado')+'</strong> · '+esc((data.week&&data.week.label)||'')+(period?(' · '+period):'')+'<br><span style="font-size:12px;">Atualizado em '+esc(new Date(data.period&&data.period.generatedAt||Date.now()).toLocaleTimeString('pt-BR'))+'. Enquanto a semana está aberta, novos lançamentos entram aqui automaticamente ao atualizar a tela.</span>'+privacy;
+  }
   if($('cqStatusBadge')) {
     var tone=(data.overall&&data.overall.tone)||'ok';
     $('cqStatusBadge').className='cq-badge '+(tone==='alert'?'alert':(tone==='wait'?'wait':'ok'));
@@ -8460,7 +8496,10 @@ function _cqAcertoMeta(c, isSector){
 function renderConsultasAcerto(data){
   var congs=(data.congregations||[]);
   var sectors=(data.sectors||[]);
+  var isCong=!!(currentUser && currentUser.role === 'tesoureiro_congregacao');
   var congBox=$('cqCongAcerto'), sectorBox=$('cqSectorAcerto');
+  var sectorCard=$('cqSectorAcertoCard');
+  if(sectorCard) sectorCard.style.display = isCong ? 'none' : '';
   if(congBox) {
     congBox.innerHTML = congs.length ? congs.map(function(c){
       var actions='';
@@ -8478,6 +8517,7 @@ function renderConsultasAcerto(data){
     }).join('') : '<div class="cq-empty">Nenhuma congregação no seu acesso.</div>';
   }
   if(sectorBox) {
+    if(isCong) { sectorBox.innerHTML=''; return; }
     sectorBox.innerHTML = sectors.length ? sectors.map(function(s){
       var actions='';
       if(s.canClose) actions+='<button type="button" class="btn btn-primary" onclick="cqCloseSector('+Number(s.id)+')">Fechar semana do setor</button>';
@@ -8610,14 +8650,24 @@ function exportConsultasExcel(){
     ['Membros que contribuíram', t.contributors||0],
   ], [28,22]);
   XLSX.utils.book_append_sheet(wb,sheet,'Resumo');
+  var isCong=!!(currentUser && currentUser.role === 'tesoureiro_congregacao');
+  var congHeader=isCong
+    ? ['Congregação','Entradas','Saídas','Saldo','Despesas pendentes','Situação']
+    : ['Congregação','Setor','Entradas','Saídas','Saldo','Despesas pendentes','Situação'];
+  var congWidths=isCong ? [26,14,14,14,18,34] : [26,22,14,14,14,18,34];
   XLSX.utils.book_append_sheet(wb,_cqSheet(
-    [['Congregação','Setor','Entradas','Saídas','Saldo','Despesas pendentes','Situação']].concat((d.congregations||[]).map(function(c){
-      return [c.name,c.sectorName,c.income,c.expense,c.balance,c.pendingExpenses,c.statusLabel];
-    })), [26,22,14,14,14,18,34]), 'Acerto congregação x setor');
-  XLSX.utils.book_append_sheet(wb,_cqSheet(
-    [['Setor','Entradas','Saídas','Saldo','Congregações validadas','Prestação','Situação']].concat((d.sectors||[]).map(function(s){
-      return [s.name,s.income,s.expense,s.balance,(s.validatedCongregations||0)+'/'+(s.congregations||0),(s.prestacao&&s.prestacao.label)||'',s.statusLabel];
-    })), [24,14,14,14,20,24,34]), 'Acerto setor x sede');
+    [congHeader].concat((d.congregations||[]).map(function(c){
+      return isCong
+        ? [c.name,c.income,c.expense,c.balance,c.pendingExpenses,c.statusLabel]
+        : [c.name,c.sectorName,c.income,c.expense,c.balance,c.pendingExpenses,c.statusLabel];
+    })), congWidths), 'Acerto congregação x setor');
+  // Congregação não recebe nem exporta dados da instância superior (setor × sede).
+  if(!isCong) {
+    XLSX.utils.book_append_sheet(wb,_cqSheet(
+      [['Setor','Entradas','Saídas','Saldo','Congregações validadas','Prestação','Situação']].concat((d.sectors||[]).map(function(s){
+        return [s.name,s.income,s.expense,s.balance,(s.validatedCongregations||0)+'/'+(s.congregations||0),(s.prestacao&&s.prestacao.label)||'',s.statusLabel];
+      })), [24,14,14,14,20,24,34]), 'Acerto setor x sede');
+  }
   XLSX.utils.book_append_sheet(wb,_cqSheet(
     [['Membro','Código','Telefone','Dízimos','Contribuições','Total']].concat(_cqFilteredContributors().map(function(c){
       return [c.name,c.memberCode,c.phone,c.titheCount||0,c.count||0,c.total||0];
@@ -8653,6 +8703,14 @@ function printConsultas(){
   var t=d.totals||{};
   var list=_cqFilteredContributors();
   var escHtml=function(v){ return esc(v); };
+  var isCong=!!(currentUser && currentUser.role === 'tesoureiro_congregacao');
+  // Congregação não imprime a instância superior (setor × sede).
+  var sectorHtml='';
+  if(!isCong) {
+    sectorHtml='<h2>Acerto setor × sede</h2><table><tr><th>Setor</th><th>Entradas</th><th>Saídas</th><th>Saldo</th><th>Situação</th></tr>'
+      + (d.sectors||[]).map(function(s){ return '<tr><td>'+escHtml(s.name)+'</td><td class="right">'+_finMoney(s.income)+'</td><td class="right">'+_finMoney(s.expense)+'</td><td class="right">'+_finMoney(s.balance)+'</td><td>'+escHtml(s.statusLabel)+'</td></tr>'; }).join('')
+      + '</table>';
+  }
   var w=window.open('','_blank');
   if(!w) return showToast('Permita pop-ups para imprimir','error');
   w.document.write('<html><head><title>Consultas — resumo e dizimistas</title><style>'
@@ -8669,9 +8727,7 @@ function printConsultas(){
     + '<div class="summary"><div><strong>Entradas:</strong> '+_finMoney(t.income||0)+'</div><div><strong>Saídas:</strong> '+_finMoney(t.expense||0)+'</div><div><strong>Saldo:</strong> '+_finMoney(t.balance||0)+'</div><div><strong>Contribuintes:</strong> '+(t.contributors||0)+'</div></div>'
     + '<h2>Acerto congregação × setor</h2><table><tr><th>Congregação</th><th>Entradas</th><th>Saídas</th><th>Saldo</th><th>Situação</th></tr>'
     + (d.congregations||[]).map(function(c){ return '<tr><td>'+escHtml(c.name)+'</td><td class="right">'+_finMoney(c.income)+'</td><td class="right">'+_finMoney(c.expense)+'</td><td class="right">'+_finMoney(c.balance)+'</td><td>'+escHtml(c.statusLabel)+'</td></tr>'; }).join('')
-    + '</table><h2>Acerto setor × sede</h2><table><tr><th>Setor</th><th>Entradas</th><th>Saídas</th><th>Saldo</th><th>Situação</th></tr>'
-    + (d.sectors||[]).map(function(s){ return '<tr><td>'+escHtml(s.name)+'</td><td class="right">'+_finMoney(s.income)+'</td><td class="right">'+_finMoney(s.expense)+'</td><td class="right">'+_finMoney(s.balance)+'</td><td>'+escHtml(s.statusLabel)+'</td></tr>'; }).join('')
-    + '</table><h2>Lista de dizimistas e contribuintes ('+list.length+')</h2><table><tr><th>Membro</th><th>Código</th><th>Telefone</th><th class="right">Dízimos</th><th class="right">Contribuições</th><th class="right">Total</th></tr>'
+    + '</table>' + sectorHtml + '<h2>Lista de dizimistas e contribuintes ('+list.length+')</h2><table><tr><th>Membro</th><th>Código</th><th>Telefone</th><th class="right">Dízimos</th><th class="right">Contribuições</th><th class="right">Total</th></tr>'
     + list.map(function(c){ return '<tr><td>'+escHtml(c.name)+'</td><td>'+escHtml(c.memberCode||'—')+'</td><td>'+escHtml(c.phone||'—')+'</td><td class="right">'+String(c.titheCount||0)+'</td><td class="right">'+String(c.count||0)+'</td><td class="right">'+_finMoney(c.total)+'</td></tr>'; }).join('')
     + '</table><p style="margin-top:18px;"><button onclick="window.print()">Imprimir / salvar como PDF</button></p></body></html>');
   w.document.close();

@@ -1252,12 +1252,12 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
     <div class="cq-layout">
       <div class="cq-main">
         <div class="cq-acerto-grid">
-          <div class="card">
+          <div class="card" id="cqCongAcertoCard">
             <div class="card-title-row"><h3 class="card-title" style="margin:0;">Acerto: congregação × setor</h3></div>
             <p class="cq-help">Cada congregação compara entradas, saídas e saldo. Sem despesas pendentes, o responsável pode fechar a semana.</p>
             <div id="cqCongAcerto"></div>
           </div>
-          <div class="card">
+          <div class="card" id="cqSectorAcertoCard">
             <div class="card-title-row"><h3 class="card-title" style="margin:0;">Acerto: setor × sede</h3></div>
             <p class="cq-help">O setor reúne as congregações, presta contas e envia o resultado à sede.</p>
             <div id="cqSectorAcerto"></div>
@@ -1307,8 +1307,8 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
           </div>
           <div class="form-group"><label class="form-label">De (data inicial)</label><input class="form-input" id="cqFrom" type="date"></div>
           <div class="form-group"><label class="form-label">Até (data final)</label><input class="form-input" id="cqTo" type="date"></div>
-          <div class="form-group"><label class="form-label">Setor</label><select class="form-input" id="cqSector" onchange="onConsultasSectorChange()"><option value="">Todos (no meu acesso)</option></select></div>
-          <div class="form-group"><label class="form-label">Congregação</label><select class="form-input" id="cqCong"><option value="">Todas (no meu acesso)</option></select></div>
+          <div class="form-group" id="cqSectorGroup"><label class="form-label">Setor</label><select class="form-input" id="cqSector" onchange="onConsultasSectorChange()"><option value="">Todos (no meu acesso)</option></select></div>
+          <div class="form-group" id="cqCongGroup"><label class="form-label">Congregação</label><select class="form-input" id="cqCong"><option value="">Todas (no meu acesso)</option></select></div>
           <div class="form-group"><label class="form-label">Situação</label><select class="form-input" id="cqStatus"><option value="">Todas</option><option value="confirmado">Confirmado / realizado</option><option value="pendente">Pendente / em análise</option><option value="aprovado">Aprovado</option><option value="pago">Pago</option><option value="vencida">Conta vencida</option><option value="cancelado">Cancelado / rejeitado</option></select></div>
           <div class="form-group"><label class="form-label">Forma</label><select class="form-input" id="cqPayment"><option value="">Todas</option><option value="pix">PIX</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="outros">Outros</option></select></div>
           <div class="form-group"><label class="form-label">Buscar (nome, categoria, descrição)</label><input class="form-input" id="cqSearch" placeholder="Ex.: luz, João, dízimo"></div>
@@ -1840,7 +1840,7 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
   <div class="toast" id="toast"></div>
 </div>
 
-<script src="app.js?v=39"></script>
+<script src="app.js?v=40"></script>
 
 
 <script src="mbw.js?v=12"></script>
