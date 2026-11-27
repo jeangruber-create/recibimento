@@ -49,6 +49,8 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
 .app { display: flex; flex-direction: column; min-height: 100vh; }
 .screen { display: none; flex: 1; flex-direction: column; padding: calc(var(--topbar-h) + 16px) 16px calc(var(--bottom-h) + 24px); overflow-y: auto; }
 .screen.active { display: flex; }
+.back-btn { display: inline-flex; align-items: center; gap: 6px; width: max-content; max-width: 100%; font-size: 13px; color: var(--text-muted); cursor: pointer; margin-bottom: 10px; }
+.back-btn svg { width: 18px; height: 18px; flex: 0 0 auto; }
 
 /* Navegação rápida (mobile-first).
    Precisa valer em TODAS as larguras: a barra fica logo abaixo do topbar fixo.
@@ -180,6 +182,70 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
   .finance-side { display: flex; }
   .finance-bar .finance-bar-consultas { display: none; }
 }
+
+/* ===== Consultas: resumo em tempo real, acertos e filtros laterais ===== */
+#screenConsultas { overflow-y: visible; }
+.cq-bar {
+  position: sticky; top: var(--topbar-h); z-index: 30;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 12px; margin-bottom: 12px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.cq-bar-title { flex: 1 1 170px; min-width: 0; }
+.cq-bar-title span { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted); font-weight: 700; }
+.cq-bar-title strong { display: block; font-size: 16px; line-height: 1.25; }
+.cq-quick { display: flex; gap: 6px; flex-wrap: wrap; }
+.cq-chip {
+  border: 1px solid var(--border); background: var(--card); color: var(--text);
+  padding: 7px 11px; border-radius: 999px; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.cq-chip.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+.cq-filter-toggle { display: inline-flex; }
+.cq-status-card { border-left: 4px solid var(--primary); }
+.cq-status-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.cq-help { font-size: 13px; color: var(--text-muted); margin: 4px 0 0; line-height: 1.5; }
+.cq-badge { display: inline-block; padding: 5px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; background: #eef3f8; color: var(--primary); }
+.cq-badge.ok { background: #e6f5ea; color: var(--success); }
+.cq-badge.wait { background: #fff4d6; color: #8a6100; }
+.cq-badge.alert { background: #fdeaea; color: var(--error); }
+.cq-closing-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.cq-closing-actions:empty { display: none; }
+.cq-closing-actions .btn { flex: 1 1 180px; }
+.cq-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+.cq-kpi { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; min-width: 0; }
+.cq-kpi span { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); font-weight: 700; }
+.cq-kpi strong { display: block; font-size: 18px; margin-top: 4px; word-break: break-word; }
+.cq-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+.cq-main, .cq-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.cq-side { display: none; }
+.cq-side.open { display: flex; }
+.cq-side-card h3 { margin-bottom: 8px; }
+.cq-side-card p { font-size: 12px; color: var(--text-muted); margin: 0 0 10px; line-height: 1.5; }
+.cq-side .form-group { margin: 0 0 8px; }
+.cq-side .form-input { width: 100%; }
+.cq-side .btn { width: 100%; margin-top: 4px; }
+.cq-check { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 6px 0 10px; }
+.cq-acerto-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.cq-acerto-row { border-bottom: 1px solid var(--border); padding: 10px 0; }
+.cq-acerto-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.cq-acerto-title { font-weight: 700; font-size: 14px; line-height: 1.35; }
+.cq-acerto-meta { font-size: 12px; color: var(--text-muted); margin-top: 3px; line-height: 1.5; }
+.cq-acerto-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.cq-acerto-actions .btn { flex: 1 1 120px; min-width: 100px; font-size: 12px; padding: 7px 9px; }
+.cq-empty { font-size: 13px; color: var(--text-muted); padding: 12px; text-align: center; background: var(--bg); border-radius: var(--radius-sm); }
+.cq-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.cq-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); padding: 7px 6px; border-bottom: 1px solid var(--border); }
+.cq-table td { padding: 8px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.cq-table td.right { text-align: right; white-space: nowrap; }
+.cq-table-wrap { overflow-x: auto; }
+@media (min-width: 720px) { .cq-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+@media (min-width: 840px) {
+  .cq-layout { grid-template-columns: minmax(0, 1fr) 260px; }
+  .cq-side { display: flex; }
+  .cq-bar .cq-filter-toggle { display: none; }
+}
+@media (min-width: 1100px) { .cq-acerto-grid { grid-template-columns: 1fr 1fr; } }
 
 /* ===== Fila de agradecimentos (sede) ===== */
 .thanks-item { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px; background: #fff; }
@@ -1141,49 +1207,122 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
     <div id="structureContent"></div>
   </section>
 
-  <!-- SCREEN: CONSULTAS DE LANÇAMENTOS -->
+  <!-- SCREEN: CONSULTAS (resumo em tempo real, acertos e filtros) -->
   <section class="screen" id="screenConsultas" data-title="Consultas">
     <div class="back-btn" onclick="goHome()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
       Voltar ao Início
     </div>
-    <div class="card" style="margin-bottom:12px;">
-      <h2 class="card-title" style="margin-bottom:4px;">Consultas de lançamentos</h2>
-      <p style="font-size:13px; color:var(--text-muted); margin:0;">Pesquise <strong>entradas</strong> (dízimos/ofertas), <strong>saídas</strong> (despesas pagas) e <strong>contas a pagar</strong> por data, período, local e situação. Escolha os filtros e toque em <strong>Consultar</strong>.</p>
-      <div id="consultasContext" style="margin-top:8px; font-size:13px; color:var(--text-muted);"></div>
+
+    <div class="cq-bar">
+      <div class="cq-bar-title">
+        <span>Consultas em tempo real</span>
+        <strong id="cqScopeTitle">Resumo do movimento</strong>
+      </div>
+      <div class="cq-quick">
+        <button type="button" class="cq-chip" data-period="today" onclick="setConsultasPeriod('today')">Hoje</button>
+        <button type="button" class="cq-chip active" data-period="week" onclick="setConsultasPeriod('week')">Semana</button>
+        <button type="button" class="cq-chip" data-period="month" onclick="setConsultasPeriod('month')">Mês</button>
+        <button type="button" class="cq-chip" data-period="30" onclick="setConsultasPeriod('30')">30 dias</button>
+        <button type="button" class="cq-chip" data-period="custom" onclick="setConsultasPeriod('custom')">Personalizado</button>
+      </div>
+      <button type="button" class="btn btn-secondary" style="padding:8px 12px;" onclick="refreshConsultas()">Atualizar</button>
+      <button type="button" class="btn btn-outline cq-filter-toggle" style="padding:8px 12px;" onclick="toggleConsultasFilters()">Filtros</button>
     </div>
-    <div class="card" style="margin-bottom:12px;">
-      <h3 class="card-title">Filtros</h3>
-      <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <div class="form-group" style="flex:1; min-width:190px; margin:0 0 8px;">
-          <label class="form-label">O que consultar</label>
-          <select class="form-input" id="cqKind"><option value="all">Tudo (entradas, saídas e contas a pagar)</option><option value="receipt">Entradas (dízimos e ofertas)</option><option value="expense">Saídas (despesas pagas)</option><option value="payable">Contas a pagar</option></select>
+
+    <div class="card cq-status-card" style="margin-bottom:12px;">
+      <div class="cq-status-head">
+        <div>
+          <h2 class="card-title" style="margin-bottom:4px;">Situação até agora</h2>
+          <p class="cq-help" id="cqStatusText">Carregando o resumo do movimento...</p>
         </div>
-        <div class="form-group" style="flex:1; min-width:160px; margin:0 0 8px;">
-          <label class="form-label">Período rápido</label>
-          <select class="form-input" id="cqPeriod" onchange="applyConsultasPeriod()"><option value="month">Este mês</option><option value="today">Hoje</option><option value="week">Esta semana</option><option value="30">Últimos 30 dias</option><option value="custom">Personalizado (escolher datas)</option></select>
-        </div>
+        <span class="cq-badge" id="cqStatusBadge">Atualizando</span>
       </div>
-      <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <div class="form-group" style="flex:1; min-width:140px; margin:0 0 8px;"><label class="form-label">De (data inicial)</label><input class="form-input" id="cqFrom" type="date"></div>
-        <div class="form-group" style="flex:1; min-width:140px; margin:0 0 8px;"><label class="form-label">Até (data final)</label><input class="form-input" id="cqTo" type="date"></div>
-      </div>
-      <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <div class="form-group" style="flex:1; min-width:180px; margin:0 0 8px;"><label class="form-label">Setor</label><select class="form-input" id="cqSector" onchange="fillConsultasCongs()"><option value="">Todos (no meu acesso)</option></select></div>
-        <div class="form-group" style="flex:1; min-width:180px; margin:0 0 8px;"><label class="form-label">Congregação</label><select class="form-input" id="cqCong"><option value="">Todas (no meu acesso)</option></select></div>
-      </div>
-      <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <div class="form-group" style="flex:1; min-width:160px; margin:0 0 8px;"><label class="form-label">Situação</label><select class="form-input" id="cqStatus"><option value="">Todas</option><option value="confirmado">Confirmado / realizado</option><option value="pendente">Pendente / em análise</option><option value="aprovado">Aprovado</option><option value="pago">Pago</option><option value="vencida">Conta vencida</option><option value="cancelado">Cancelado / rejeitado</option></select></div>
-        <div class="form-group" style="flex:1; min-width:140px; margin:0 0 8px;"><label class="form-label">Forma</label><select class="form-input" id="cqPayment"><option value="">Todas</option><option value="pix">PIX</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="outros">Outros</option></select></div>
-        <div class="form-group" style="flex:2; min-width:180px; margin:0 0 8px;"><label class="form-label">Busca (nome, categoria, descrição)</label><input class="form-input" id="cqSearch" placeholder="Ex.: luz, João, dízimo"></div>
-      </div>
-      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:4px;"><button type="button" class="btn btn-primary" onclick="runConsultas()">Consultar</button><button type="button" class="btn btn-outline" onclick="clearConsultasFilters()">Limpar filtros</button></div>
+      <div class="cq-closing-actions" id="cqClosingActions"></div>
     </div>
-    <div class="card" style="margin-bottom:12px;">
-      <h3 class="card-title">Resultado</h3>
-      <div id="consultasSummary" style="font-size:13px; color:var(--text-muted); margin-bottom:10px;">Escolha os filtros e toque em Consultar.</div>
-      <div id="consultasTotals" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;"></div>
-      <div id="consultasResults"></div>
+
+    <div class="cq-kpis">
+      <div class="cq-kpi"><span>Entradas</span><strong id="cqKpiIncome">—</strong></div>
+      <div class="cq-kpi"><span>Saídas pagas</span><strong id="cqKpiExpense">—</strong></div>
+      <div class="cq-kpi"><span>Saldo para acerto</span><strong id="cqKpiBalance">—</strong></div>
+      <div class="cq-kpi"><span>Contas em aberto</span><strong id="cqKpiPayables">—</strong></div>
+      <div class="cq-kpi"><span>Membros que contribuíram</span><strong id="cqKpiContributors">—</strong></div>
+    </div>
+
+    <div class="cq-layout">
+      <div class="cq-main">
+        <div class="cq-acerto-grid">
+          <div class="card">
+            <div class="card-title-row"><h3 class="card-title" style="margin:0;">Acerto: congregação × setor</h3></div>
+            <p class="cq-help">Cada congregação compara entradas, saídas e saldo. Sem despesas pendentes, o responsável pode fechar a semana.</p>
+            <div id="cqCongAcerto"></div>
+          </div>
+          <div class="card">
+            <div class="card-title-row"><h3 class="card-title" style="margin:0;">Acerto: setor × sede</h3></div>
+            <p class="cq-help">O setor reúne as congregações, presta contas e envia o resultado à sede.</p>
+            <div id="cqSectorAcerto"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title-row">
+            <h3 class="card-title" style="margin:0;">Lançamentos do período</h3>
+            <button type="button" class="btn btn-outline" style="padding:6px 10px; font-size:12px;" onclick="exportConsultasExcel()">Excel</button>
+          </div>
+          <div id="consultasSummary" class="cq-help">Escolha os filtros e toque em Consultar.</div>
+          <div id="consultasTotals" style="display:flex; gap:8px; flex-wrap:wrap; margin:10px 0;"></div>
+          <div id="consultasResults"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title-row">
+            <h3 class="card-title" style="margin:0;">Lista de dizimistas e contribuintes</h3>
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              <button type="button" class="btn btn-outline" style="padding:6px 10px; font-size:12px;" onclick="exportConsultasDizimistasExcel()">Excel</button>
+              <button type="button" class="btn btn-outline" style="padding:6px 10px; font-size:12px;" onclick="printConsultas()">Imprimir / PDF</button>
+            </div>
+          </div>
+          <div id="cqContributorsInfo" class="cq-help"></div>
+          <div id="cqContributorsList" class="cq-table-wrap"></div>
+        </div>
+      </div>
+
+      <aside class="cq-side" id="cqSide">
+        <div class="card cq-side-card">
+          <h3 class="card-title">Filtros</h3>
+          <p>Escolha o que deseja ver e toque em Consultar.</p>
+          <div class="form-group">
+            <label class="form-label">O que consultar</label>
+            <select class="form-input" id="cqKind"><option value="all">Tudo (entradas e saídas)</option><option value="receipt">Entradas (dízimos e ofertas)</option><option value="expense">Saídas (despesas pagas)</option><option value="payable">Contas a pagar</option></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Período</label>
+            <select class="form-input" id="cqPeriod" onchange="setConsultasPeriod(this.value)">
+              <option value="today">Hoje</option>
+              <option value="week" selected>Esta semana (até hoje)</option>
+              <option value="month">Este mês</option>
+              <option value="30">Últimos 30 dias</option>
+              <option value="custom">Personalizado (escolher datas)</option>
+            </select>
+          </div>
+          <div class="form-group"><label class="form-label">De (data inicial)</label><input class="form-input" id="cqFrom" type="date"></div>
+          <div class="form-group"><label class="form-label">Até (data final)</label><input class="form-input" id="cqTo" type="date"></div>
+          <div class="form-group"><label class="form-label">Setor</label><select class="form-input" id="cqSector" onchange="onConsultasSectorChange()"><option value="">Todos (no meu acesso)</option></select></div>
+          <div class="form-group"><label class="form-label">Congregação</label><select class="form-input" id="cqCong"><option value="">Todas (no meu acesso)</option></select></div>
+          <div class="form-group"><label class="form-label">Situação</label><select class="form-input" id="cqStatus"><option value="">Todas</option><option value="confirmado">Confirmado / realizado</option><option value="pendente">Pendente / em análise</option><option value="aprovado">Aprovado</option><option value="pago">Pago</option><option value="vencida">Conta vencida</option><option value="cancelado">Cancelado / rejeitado</option></select></div>
+          <div class="form-group"><label class="form-label">Forma</label><select class="form-input" id="cqPayment"><option value="">Todas</option><option value="pix">PIX</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="outros">Outros</option></select></div>
+          <div class="form-group"><label class="form-label">Buscar (nome, categoria, descrição)</label><input class="form-input" id="cqSearch" placeholder="Ex.: luz, João, dízimo"></div>
+          <label class="cq-check"><input type="checkbox" id="cqOnlyTithers" onchange="renderConsultasContributors()"> Mostrar só quem deu dízimo</label>
+          <button type="button" class="btn btn-primary" onclick="refreshConsultas()">Consultar</button>
+          <button type="button" class="btn btn-outline" onclick="clearConsultasFilters()">Limpar filtros</button>
+        </div>
+        <div class="card cq-side-card">
+          <h3 class="card-title">Exportar</h3>
+          <p>Os relatórios usam os filtros escolhidos. O PDF abre uma página pronta para imprimir.</p>
+          <button type="button" class="btn btn-secondary" onclick="exportConsultasExcel()">Relatório em Excel</button>
+          <button type="button" class="btn btn-secondary" onclick="printConsultas()">Imprimir / salvar PDF</button>
+        </div>
+      </aside>
     </div>
   </section>
 
@@ -1701,7 +1840,7 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
   <div class="toast" id="toast"></div>
 </div>
 
-<script src="app.js?v=38"></script>
+<script src="app.js?v=39"></script>
 
 
 <script src="mbw.js?v=12"></script>

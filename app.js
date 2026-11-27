@@ -12,8 +12,8 @@ function showVersionBadge() {
 }
 
 // ============ VERSAO DO SISTEMA ============
-const APP_VERSION = '2026-11-25-v30';
-const APP_BUILD = 'despesas-tela-intuitiva';
+const APP_VERSION = '2026-11-27-v31';
+const APP_BUILD = 'consultas-tempo-real';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
@@ -8275,27 +8275,47 @@ function renderStructureScreen(){
   el.innerHTML = html;
 }
 
+let consultasResumo = null;
+let consultasRowsCache = [];
+
 function openConsultasScope(sectorId, congId){
   navigate('screenConsultas');
   setTimeout(function(){
     if ($('cqSector') && sectorId!=null) $('cqSector').value = String(sectorId);
     if (typeof fillConsultasCongs === 'function') fillConsultasCongs();
     if ($('cqCong') && congId!=null) $('cqCong').value = String(congId);
-    runConsultas();
+    refreshConsultas();
   }, 0);
 }
 
 function _cqIso(d){ return d.toISOString().slice(0,10); }
+function _cqUpdateChips(p){
+  var chips = document.querySelectorAll('#screenConsultas .cq-chip');
+  for (var i=0;i<chips.length;i++) chips[i].classList.toggle('active', chips[i].getAttribute('data-period')===p);
+}
 function applyConsultasPeriod(){
-  var p = (($('cqPeriod')||{}).value)||'month';
+  var p = (($('cqPeriod')||{}).value)||'week';
   var now = new Date(); var from = new Date(now); var to = new Date(now);
-  if (p==='today') { /* same */ }
+  if (p==='today') { /* mesmo dia */ }
   else if (p==='week') { var day=(now.getDay()+6)%7; from.setDate(now.getDate()-day); }
   else if (p==='30') { from.setDate(now.getDate()-29); }
   else if (p==='month') { from = new Date(now.getFullYear(), now.getMonth(), 1); }
-  else { return; } // custom
+  else { _cqUpdateChips('custom'); return; } // personalizado: mantém as datas escolhidas
   if ($('cqFrom')) $('cqFrom').value = _cqIso(from);
   if ($('cqTo')) $('cqTo').value = _cqIso(to);
+  _cqUpdateChips(p);
+}
+function setConsultasPeriod(p){
+  if ($('cqPeriod')) $('cqPeriod').value = p;
+  applyConsultasPeriod();
+  refreshConsultas();
+}
+function onConsultasSectorChange(){
+  fillConsultasCongs();
+}
+function toggleConsultasFilters(){
+  var side = $('cqSide'); if (!side) return;
+  side.classList.toggle('open');
 }
 function fillConsultasCongs(){
   var ss=$('cqSector'), cs=$('cqCong'); if(!ss||!cs) return;
@@ -8318,20 +8338,344 @@ function _populateConsultasScope(){
 function renderConsultasScreen(){
   if (!canManage(currentUser)) { showToast('Acesso restrito', 'error'); return navigate('screenAdmin'); }
   _populateConsultasScope();
-  if ($('consultasContext')) $('consultasContext').textContent = 'Consultando em: ' + (currentUser.role==='sede'?'Sede (consolidado — você pode filtrar por setor/congregação)': (ROLE_LABELS[currentUser.role]||'')) + '.';
   if (!$('cqFrom') || !$('cqFrom').value) applyConsultasPeriod();
+  _cqUpdateChips((($('cqPeriod')||{}).value)||'week');
+  refreshConsultas();
 }
 function clearConsultasFilters(){
   if($('cqKind')) $('cqKind').value='all';
-  if($('cqPeriod')) $('cqPeriod').value='month';
+  if($('cqPeriod')) $('cqPeriod').value='week';
   applyConsultasPeriod();
   if($('cqStatus')) $('cqStatus').value='';
   if($('cqPayment')) $('cqPayment').value='';
   if($('cqSearch')) $('cqSearch').value='';
+  if($('cqOnlyTithers')) $('cqOnlyTithers').checked=false;
   _populateConsultasScope();
-  if($('consultasSummary')) $('consultasSummary').textContent='Filtros limpos. Toque em Consultar.';
-  if($('consultasTotals')) $('consultasTotals').innerHTML='';
-  if($('consultasResults')) $('consultasResults').innerHTML='';
+  refreshConsultas();
+}
+
+function _cqQueryParts(){
+  var p=[];
+  var from=(($('cqFrom')||{}).value||'').trim();
+  var to=(($('cqTo')||{}).value||'').trim();
+  if(from) p.push('from='+encodeURIComponent(from));
+  if(to) p.push('to='+encodeURIComponent(to));
+  var sectorId=(($('cqSector')||{}).value||'').trim();
+  var congId=(($('cqCong')||{}).value||'').trim();
+  if(sectorId && _canPickSector()) p.push('sectorId='+encodeURIComponent(sectorId));
+  if(congId && _canPickCong()) p.push('congregationId='+encodeURIComponent(congId));
+  return p;
+}
+
+async function refreshConsultas(){
+  if (!canManage(currentUser)) return;
+  await Promise.allSettled([loadConsultasResumo(), runConsultas()]);
+}
+
+async function loadConsultasResumo(){
+  try {
+    if($('cqStatusText')) $('cqStatusText').textContent='Carregando o resumo do movimento...';
+    var p=_cqQueryParts();
+    var out=await Api.get('/api/consultas/resumo'+(p.length?('?'+p.join('&')):''));
+    consultasResumo=out;
+    renderConsultasResumo(out);
+  } catch(e) {
+    console.error('[consultas] resumo', e);
+    consultasResumo=null;
+    if($('cqStatusText')) $('cqStatusText').textContent='Não foi possível carregar o resumo agora. Tente novamente.';
+    if($('cqStatusBadge')) { $('cqStatusBadge').textContent='Sem conexão'; $('cqStatusBadge').className='cq-badge alert'; }
+    if($('cqCongAcerto')) $('cqCongAcerto').innerHTML='<div class="cq-empty">Resumo indisponível no momento.</div>';
+    if($('cqSectorAcerto')) $('cqSectorAcerto').innerHTML='<div class="cq-empty">Resumo indisponível no momento.</div>';
+    if($('cqContributorsList')) $('cqContributorsList').innerHTML='';
+    if($('cqContributorsInfo')) $('cqContributorsInfo').textContent='';
+  }
+}
+
+function _cqBadge(label, tone){
+  return '<span class="cq-badge '+(tone||'')+'">'+esc(label)+'</span>';
+}
+
+function renderConsultasResumo(data){
+  if(!data) return;
+  var t=data.totals||{};
+  var from=(($('cqFrom')||{}).value||'').trim();
+  var to=(($('cqTo')||{}).value||'').trim();
+  var period=(from||to) ? ('Período: '+esc(from||'início')+' a '+esc(to||'hoje')) : '';
+
+  if($('cqScopeTitle')) $('cqScopeTitle').textContent=(data.scope&&data.scope.label)||'Resumo do movimento';
+  if($('cqStatusText')) $('cqStatusText').innerHTML='<strong>'+esc((data.overall&&data.overall.label)||'Resumo atualizado')+'</strong> · '+esc((data.week&&data.week.label)||'')+(period?(' · '+period):'')+'<br><span style="font-size:12px;">Atualizado em '+esc(new Date(data.period&&data.period.generatedAt||Date.now()).toLocaleTimeString('pt-BR'))+'. Enquanto a semana está aberta, novos lançamentos entram aqui automaticamente ao atualizar a tela.</span>';
+  if($('cqStatusBadge')) {
+    var tone=(data.overall&&data.overall.tone)||'ok';
+    $('cqStatusBadge').className='cq-badge '+(tone==='alert'?'alert':(tone==='wait'?'wait':'ok'));
+    $('cqStatusBadge').textContent=tone==='alert'?'Precisa de atenção':(tone==='wait'?'Aguardando validação':'Tudo certo');
+  }
+  if($('cqKpiIncome')) $('cqKpiIncome').textContent=_finMoney(t.income||0);
+  if($('cqKpiExpense')) $('cqKpiExpense').textContent=_finMoney(t.expense||0);
+  if($('cqKpiBalance')) { $('cqKpiBalance').textContent=_finMoney(t.balance||0); $('cqKpiBalance').style.color=(t.balance||0)<0?'var(--error)':'var(--success)'; }
+  if($('cqKpiPayables')) $('cqKpiPayables').textContent=_finMoney(t.payablesOpen||0);
+  if($('cqKpiContributors')) $('cqKpiContributors').textContent=String(t.contributors||0);
+
+  renderConsultasClosingActions(data);
+  renderConsultasAcerto(data);
+  renderConsultasContributors();
+}
+
+function renderConsultasClosingActions(data){
+  var box=$('cqClosingActions'); if(!box) return;
+  var role=(currentUser&&currentUser.role)||'';
+  var html='';
+  if(role==='tesoureiro_congregacao') {
+    var mine=(data.congregations||[]).filter(function(c){ return Number(c.id)===Number(currentUser.congregationId); })[0];
+    if(mine && mine.canClose) html+='<button type="button" class="btn btn-primary" onclick="cqCloseCong('+Number(mine.sectorId)+','+Number(mine.id)+')">Fechar a semana da minha congregação</button>';
+    else if(mine && mine.closure && mine.closure.status==='closed') html+='<p class="cq-help">Sua congregação já fechou. Aguarde a validação do setor.</p>';
+    else if(mine && mine.closure && mine.closure.status==='validated') html+='<p class="cq-help">Semana fechada e validada. Pronto para a prestação de contas.</p>';
+    else html+='<p class="cq-help">Ajuste as pendências abaixo para liberar o fechamento da semana.</p>';
+  } else if(role==='tesoureiro_setor') {
+    var canCloseSec=(data.sectors||[]).filter(function(s){ return s.canClose; });
+    var toValidate=(data.congregations||[]).filter(function(c){ return c.canValidate; });
+    if(canCloseSec.length) html+='<button type="button" class="btn btn-primary" onclick="cqCloseSector('+Number(canCloseSec[0].id)+')">Fechar a semana do setor</button>';
+    else if(toValidate.length) html+='<button type="button" class="btn btn-secondary" onclick="cqValidateCong(\''+esc(toValidate[0].closure.id)+'\')">Validar próximo fechamento</button>';
+    else html+='<p class="cq-help">Acompanhe os fechamentos das congregações para liberar o fechamento do setor.</p>';
+  } else if(role==='sede') {
+    html+='<p class="cq-help">A sede acompanha e valida os fechamentos. Use os botões em cada linha quando o acerto estiver correto.</p>';
+  }
+  box.innerHTML=html;
+}
+
+function _cqAcertoMeta(c, isSector){
+  var parts=[];
+  parts.push('Entradas '+_finMoney(c.income||0));
+  parts.push('Saídas '+_finMoney(c.expense||0));
+  parts.push('Saldo '+_finMoney(c.balance||0));
+  if(isSector) {
+    parts.push((c.validatedCongregations||0)+'/'+ (c.congregations||0)+' congregações validadas');
+    if(c.prestacao&&c.prestacao.label) parts.push('Prestação: '+c.prestacao.label);
+  } else {
+    if(c.pendingExpenses) parts.push(c.pendingExpenses+' despesa(s) aguardando aprovação');
+    if(c.openPayables) parts.push('Contas em aberto: '+_finMoney(c.openPayables));
+  }
+  return esc(parts.join(' · '));
+}
+
+function renderConsultasAcerto(data){
+  var congs=(data.congregations||[]);
+  var sectors=(data.sectors||[]);
+  var congBox=$('cqCongAcerto'), sectorBox=$('cqSectorAcerto');
+  if(congBox) {
+    congBox.innerHTML = congs.length ? congs.map(function(c){
+      var actions='';
+      if(c.canClose) actions+='<button type="button" class="btn btn-primary" onclick="cqCloseCong('+Number(c.sectorId)+','+Number(c.id)+')">Fechar semana</button>';
+      if(c.canValidate) actions+='<button type="button" class="btn btn-secondary" onclick="cqValidateCong(\''+esc(c.closure.id)+'\')">Validar fechamento</button>';
+      if(c.closure&&c.closure.status==='validated') actions+='<button type="button" class="btn btn-outline" onclick="cqReopenCong(\''+esc(c.closure.id)+'\')">Reabrir</button>';
+      return '<div class="cq-acerto-row">'
+        + '<div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start; flex-wrap:wrap;">'
+        + '<div class="cq-acerto-title">'+esc(c.name||('Congregação '+c.id))+'</div>'
+        + _cqBadge(c.statusLabel||'', c.tone)
+        + '</div>'
+        + '<div class="cq-acerto-meta">'+_cqAcertoMeta(c,false)+'</div>'
+        + (actions?('<div class="cq-acerto-actions">'+actions+'</div>'):'')
+        + '</div>';
+    }).join('') : '<div class="cq-empty">Nenhuma congregação no seu acesso.</div>';
+  }
+  if(sectorBox) {
+    sectorBox.innerHTML = sectors.length ? sectors.map(function(s){
+      var actions='';
+      if(s.canClose) actions+='<button type="button" class="btn btn-primary" onclick="cqCloseSector('+Number(s.id)+')">Fechar semana do setor</button>';
+      if(s.canValidate) actions+='<button type="button" class="btn btn-secondary" onclick="cqValidateCong(\''+esc(s.closure.id)+'\')">Validar fechamento</button>';
+      if(s.closure&&s.closure.status==='validated') actions+='<button type="button" class="btn btn-outline" onclick="cqReopenSector(\''+esc(s.closure.id)+'\')">Reabrir</button>';
+      var settlement=s.settlement||{};
+      var extra=[];
+      if(settlement.enviadaSede) extra.push('Enviado à sede: '+_finMoney(settlement.enviadaSede));
+      if(settlement.aQuitarAmount) extra.push('A quitar: '+_finMoney(settlement.aQuitarAmount));
+      return '<div class="cq-acerto-row">'
+        + '<div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start; flex-wrap:wrap;">'
+        + '<div class="cq-acerto-title">'+esc(s.name||('Setor '+s.id))+'</div>'
+        + _cqBadge(s.statusLabel||'', s.tone)
+        + '</div>'
+        + '<div class="cq-acerto-meta">'+_cqAcertoMeta(s,true)+(extra.length?(' · '+esc(extra.join(' · '))):'')+'</div>'
+        + (actions?('<div class="cq-acerto-actions">'+actions+'</div>'):'')
+        + '</div>';
+    }).join('') : '<div class="cq-empty">Nenhum setor no seu acesso.</div>';
+  }
+}
+
+function _cqWeekKey(){
+  if(consultasResumo && consultasResumo.week && consultasResumo.week.start) return weekKeyFromAny(consultasResumo.week.start);
+  return weekKeyFromAny(new Date());
+}
+
+async function cqCloseCong(sectorId, congregationId){
+  var cong=(consultasResumo&&consultasResumo.congregations||[]).filter(function(c){ return Number(c.id)===Number(congregationId); })[0];
+  var justification='';
+  if(cong&&cong.exceeded) {
+    justification=promptJustification('Despesas acima de 40% das entradas. Informe a justificativa:');
+    if(!justification) return showToast('Justificativa obrigatória para fechar com excedente','error');
+  }
+  try {
+    await Api.post('/api/closures/close',{ scope:'congregacao', week:_cqWeekKey(), congregationId:Number(congregationId), justification:justification });
+    showToast('Semana da congregação fechada','success');
+    await refreshConsultas();
+  } catch(e){ apiErrorToast(e); }
+}
+
+async function cqValidateCong(closureId){
+  var cl=null;
+  (consultasResumo&&consultasResumo.congregations||[]).some(function(c){ if(c.closure&&c.closure.id===closureId){ cl=c; return true; } return false; });
+  var justification=(cl&&cl.closure&&cl.closure.justification)||'';
+  if(cl&&cl.exceeded&&!justification) {
+    justification=promptJustification('Despesas acima de 40% das entradas. Informe a justificativa:');
+    if(!justification) return showToast('Justificativa obrigatória para validar com excedente','error');
+  }
+  try {
+    await Api.post('/api/closures/'+encodeURIComponent(closureId)+'/validate',{ justification:justification });
+    showToast('Fechamento validado','success');
+    await refreshConsultas();
+  } catch(e){ apiErrorToast(e); }
+}
+
+async function cqCloseSector(sectorId){
+  var sec=(consultasResumo&&consultasResumo.sectors||[]).filter(function(s){ return Number(s.id)===Number(sectorId); })[0];
+  var justification='';
+  if(sec&&sec.closure&&sec.closure.exceeded) {
+    justification=promptJustification('Despesas acima de 40% das entradas. Informe a justificativa:');
+    if(!justification) return showToast('Justificativa obrigatória para fechar com excedente','error');
+  }
+  try {
+    await Api.post('/api/closures/close',{ scope:'setor', week:_cqWeekKey(), sectorId:Number(sectorId), justification:justification });
+    showToast('Semana do setor fechada','success');
+    await refreshConsultas();
+  } catch(e){ apiErrorToast(e); }
+}
+
+function cqReopenCong(closureId){
+  showModal('Reabrir fechamento','Reabrir o fechamento desta congregação? O fechamento do setor também será reaberto.',async function(){
+    try { await Api.post('/api/closures/'+encodeURIComponent(closureId)+'/reopen'); showToast('Fechamento reaberto','success'); await refreshConsultas(); }
+    catch(e){ apiErrorToast(e); }
+  });
+}
+
+function cqReopenSector(closureId){
+  showModal('Reabrir fechamento','Reabrir o fechamento deste setor?',async function(){
+    try { await Api.post('/api/closures/'+encodeURIComponent(closureId)+'/reopen'); showToast('Fechamento reaberto','success'); await refreshConsultas(); }
+    catch(e){ apiErrorToast(e); }
+  });
+}
+
+function _cqFilteredContributors(){
+  var list=(consultasResumo&&consultasResumo.contributors)||[];
+  var only=!!($('cqOnlyTithers')&&$('cqOnlyTithers').checked);
+  return only ? list.filter(function(c){ return (c.titheCount||0)>0; }) : list;
+}
+
+function renderConsultasContributors(){
+  var list=_cqFilteredContributors();
+  var total=list.reduce(function(a,c){ return a+Number(c.total||0); },0);
+  if($('cqContributorsInfo')) {
+    $('cqContributorsInfo').textContent=list.length
+      ? (list.length+' membro(s) contribuíram no período escolhido · total '+_finMoney(total)+'. Toque nos filtros para trocar o período.')
+      : 'Nenhum membro contribuiu neste recorte.';
+  }
+  if(!$('cqContributorsList')) return;
+  if(!list.length){ $('cqContributorsList').innerHTML='<div class="cq-empty">Sem contribuições no período selecionado.</div>'; return; }
+  $('cqContributorsList').innerHTML='<table class="cq-table"><thead><tr><th>Membro</th><th>Código</th><th>Telefone</th><th style="text-align:right;">Dízimos</th><th style="text-align:right;">Contribuições</th><th style="text-align:right;">Total</th></tr></thead><tbody>'
+    + list.map(function(c){
+      return '<tr><td>'+esc(c.name||'—')+'</td><td>'+esc(c.memberCode||'—')+'</td><td>'+esc(c.phone||'—')+'</td>'
+        + '<td class="right">'+String(c.titheCount||0)+'</td><td class="right">'+String(c.count||0)+'</td><td class="right">'+_finMoney(c.total||0)+'</td></tr>';
+    }).join('')
+    + '</tbody></table>';
+}
+
+function _cqSheet(rows, cols){
+  var ws=XLSX.utils.aoa_to_sheet(rows);
+  if(cols) ws['!cols']=cols.map(function(w){ return {wch:w}; });
+  return ws;
+}
+
+function exportConsultasExcel(){
+  if(typeof XLSX==='undefined') return showToast('Biblioteca Excel não carregada','error');
+  var d=consultasResumo;
+  if(!d) return showToast('Carregue o resumo antes de exportar','warning');
+  var wb=XLSX.utils.book_new();
+  var t=d.totals||{};
+  var sheet=_cqSheet([
+    ['CONSULTAS — RESUMO EM TEMPO REAL'],
+    ['Emitido por', currentUser&&currentUser.name||''],
+    ['Período', (($('cqFrom')||{}).value||'início')+' a '+(($('cqTo')||{}).value||'hoje')],
+    ['Semana', (d.week&&d.week.label)||''],
+    [],
+    ['Entradas', t.income||0],
+    ['Saídas pagas', t.expense||0],
+    ['Saldo para acerto', t.balance||0],
+    ['Contas em aberto', t.payablesOpen||0],
+    ['Membros que contribuíram', t.contributors||0],
+  ], [28,22]);
+  XLSX.utils.book_append_sheet(wb,sheet,'Resumo');
+  XLSX.utils.book_append_sheet(wb,_cqSheet(
+    [['Congregação','Setor','Entradas','Saídas','Saldo','Despesas pendentes','Situação']].concat((d.congregations||[]).map(function(c){
+      return [c.name,c.sectorName,c.income,c.expense,c.balance,c.pendingExpenses,c.statusLabel];
+    })), [26,22,14,14,14,18,34]), 'Acerto congregação x setor');
+  XLSX.utils.book_append_sheet(wb,_cqSheet(
+    [['Setor','Entradas','Saídas','Saldo','Congregações validadas','Prestação','Situação']].concat((d.sectors||[]).map(function(s){
+      return [s.name,s.income,s.expense,s.balance,(s.validatedCongregations||0)+'/'+(s.congregations||0),(s.prestacao&&s.prestacao.label)||'',s.statusLabel];
+    })), [24,14,14,14,20,24,34]), 'Acerto setor x sede');
+  XLSX.utils.book_append_sheet(wb,_cqSheet(
+    [['Membro','Código','Telefone','Dízimos','Contribuições','Total']].concat(_cqFilteredContributors().map(function(c){
+      return [c.name,c.memberCode,c.phone,c.titheCount||0,c.count||0,c.total||0];
+    })), [30,16,18,12,16,14]), 'Dizimistas');
+  if(consultasRowsCache.length) {
+    XLSX.utils.book_append_sheet(wb,_cqSheet(
+      [['Data','Tipo','Descrição','Valor','Forma','Situação']].concat(consultasRowsCache.map(function(r){
+        var dt=r.date?new Date(r.date):null;
+        return [dt&&!isNaN(dt.getTime())?dt.toLocaleDateString('pt-BR'):'',r.kind||'',r.label||'',r.value||0,r.payment||'',r.status||''];
+      })), [12,14,42,14,12,20]), 'Lançamentos');
+  }
+  XLSX.writeFile(wb,'Consultas_'+dateKey(new Date())+'.xlsx');
+  showToast('Relatório exportado em Excel','success');
+}
+
+function exportConsultasDizimistasExcel(){
+  if(typeof XLSX==='undefined') return showToast('Biblioteca Excel não carregada','error');
+  var list=_cqFilteredContributors();
+  if(!list.length) return showToast('Nenhum dizimista para exportar','warning');
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,_cqSheet(
+    [['Membro','Código','Telefone','Quantidade de dízimos','Total dos dízimos','Contribuições','Total geral','Última contribuição']]
+      .concat(list.map(function(c){
+        return [c.name,c.memberCode,c.phone,c.titheCount||0,c.titheTotal||0,c.count||0,c.total||0,c.lastDate?new Date(c.lastDate).toLocaleDateString('pt-BR'):''];
+      })), [30,16,18,20,18,16,14,18]), 'Dizimistas');
+  XLSX.writeFile(wb,'Dizimistas_'+dateKey(new Date())+'.xlsx');
+  showToast('Lista de dizimistas exportada','success');
+}
+
+function printConsultas(){
+  var d=consultasResumo;
+  if(!d) return showToast('Carregue o resumo antes de imprimir','warning');
+  var t=d.totals||{};
+  var list=_cqFilteredContributors();
+  var escHtml=function(v){ return esc(v); };
+  var w=window.open('','_blank');
+  if(!w) return showToast('Permita pop-ups para imprimir','error');
+  w.document.write('<html><head><title>Consultas — resumo e dizimistas</title><style>'
+    + 'body{font-family:Arial,sans-serif;padding:24px;color:#1a1a1a;font-size:13px;}'
+    + 'h1{font-size:20px;color:#1B3A5C;margin:0 0 4px;} h2{font-size:15px;color:#1B3A5C;margin-top:22px;}'
+    + '.meta{color:#666;margin-bottom:16px;} table{width:100%;border-collapse:collapse;margin-top:10px;}'
+    + 'th{background:#1B3A5C;color:#fff;padding:7px;text-align:left;} td{border-bottom:1px solid #ddd;padding:6px 7px;}'
+    + '.right{text-align:right;} .summary div{display:inline-block;margin-right:22px;font-size:15px;}'
+    + '@media print{button{display:none;}}</style></head><body>'
+    + '<h1>Relatório de Consultas</h1>'
+    + '<div class="meta">'+escHtml((d.scope&&d.scope.label)||'')+' · '+escHtml((d.week&&d.week.label)||'')
+    + ' · '+escHtml(($('cqFrom')||{}).value||'início')+' a '+escHtml(($('cqTo')||{}).value||'hoje')
+    + ' · Emitido por '+escHtml((currentUser&&currentUser.name)||'')+'</div>'
+    + '<div class="summary"><div><strong>Entradas:</strong> '+_finMoney(t.income||0)+'</div><div><strong>Saídas:</strong> '+_finMoney(t.expense||0)+'</div><div><strong>Saldo:</strong> '+_finMoney(t.balance||0)+'</div><div><strong>Contribuintes:</strong> '+(t.contributors||0)+'</div></div>'
+    + '<h2>Acerto congregação × setor</h2><table><tr><th>Congregação</th><th>Entradas</th><th>Saídas</th><th>Saldo</th><th>Situação</th></tr>'
+    + (d.congregations||[]).map(function(c){ return '<tr><td>'+escHtml(c.name)+'</td><td class="right">'+_finMoney(c.income)+'</td><td class="right">'+_finMoney(c.expense)+'</td><td class="right">'+_finMoney(c.balance)+'</td><td>'+escHtml(c.statusLabel)+'</td></tr>'; }).join('')
+    + '</table><h2>Acerto setor × sede</h2><table><tr><th>Setor</th><th>Entradas</th><th>Saídas</th><th>Saldo</th><th>Situação</th></tr>'
+    + (d.sectors||[]).map(function(s){ return '<tr><td>'+escHtml(s.name)+'</td><td class="right">'+_finMoney(s.income)+'</td><td class="right">'+_finMoney(s.expense)+'</td><td class="right">'+_finMoney(s.balance)+'</td><td>'+escHtml(s.statusLabel)+'</td></tr>'; }).join('')
+    + '</table><h2>Lista de dizimistas e contribuintes ('+list.length+')</h2><table><tr><th>Membro</th><th>Código</th><th>Telefone</th><th class="right">Dízimos</th><th class="right">Contribuições</th><th class="right">Total</th></tr>'
+    + list.map(function(c){ return '<tr><td>'+escHtml(c.name)+'</td><td>'+escHtml(c.memberCode||'—')+'</td><td>'+escHtml(c.phone||'—')+'</td><td class="right">'+String(c.titheCount||0)+'</td><td class="right">'+String(c.count||0)+'</td><td class="right">'+_finMoney(c.total)+'</td></tr>'; }).join('')
+    + '</table><p style="margin-top:18px;"><button onclick="window.print()">Imprimir / salvar como PDF</button></p></body></html>');
+  w.document.close();
+  showToast('Relatório aberto para impressão','success');
 }
 
 function _cqStatusMatch(kind, raw, want){
@@ -8372,7 +8716,7 @@ async function runConsultas(){
   var congId = (($('cqCong')||{}).value)||'';
   var wantStatus = (($('cqStatus')||{}).value)||'';
   var wantPay = (($('cqPayment')||{}).value)||'';
-  var search = (($('cqSearch')||{}).value||'').trim().toLower();
+  var search = (($('cqSearch')||{}).value||'').trim().toLowerCase();
   if (!from || !to) { showToast('Informe a data inicial e final', 'error'); return; }
 
   if($('consultasSummary')) $('consultasSummary').textContent = 'Consultando...';
@@ -8422,6 +8766,7 @@ async function runConsultas(){
       });
     });
     rows.sort(function(a,b){ return String(b.date||'').localeCompare(String(a.date||'')); });
+    consultasRowsCache=rows;
 
     var sumIn=0,sumOut=0,sumPayOpen=0,pend=0;
     rows.forEach(function(r){
@@ -8461,10 +8806,23 @@ async function runConsultas(){
 window.renderStructureScreen = renderStructureScreen;
 window.renderConsultasScreen = renderConsultasScreen;
 window.runConsultas = runConsultas;
+window.refreshConsultas = refreshConsultas;
 window.applyConsultasPeriod = applyConsultasPeriod;
+window.setConsultasPeriod = setConsultasPeriod;
+window.onConsultasSectorChange = onConsultasSectorChange;
+window.toggleConsultasFilters = toggleConsultasFilters;
 window.clearConsultasFilters = clearConsultasFilters;
 window.fillConsultasCongs = fillConsultasCongs;
 window.openConsultasScope = openConsultasScope;
+window.renderConsultasContributors = renderConsultasContributors;
+window.cqCloseCong = cqCloseCong;
+window.cqValidateCong = cqValidateCong;
+window.cqCloseSector = cqCloseSector;
+window.cqReopenCong = cqReopenCong;
+window.cqReopenSector = cqReopenSector;
+window.exportConsultasExcel = exportConsultasExcel;
+window.exportConsultasDizimistasExcel = exportConsultasDizimistasExcel;
+window.printConsultas = printConsultas;
 
 
 // ============ FATIA 1: ACERTO SEMANAL (quitadas / a quitar / enviadas à sede / provisão sede) ============

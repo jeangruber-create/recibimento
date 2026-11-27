@@ -23,6 +23,7 @@ const sttRoutes = require('./routes/stt.routes');
 const financeRoutes = require('./routes/finance.routes');
 const payableRoutes = require('./routes/payables.routes');
 const acertoRoutes = require('./routes/acerto.routes');
+const consultasRoutes = require('./routes/consultas.routes');
 const thanksRoutes = require('./routes/thanks.routes');
 
 const app = express();
@@ -105,6 +106,7 @@ app.use('/api/stt', sttRoutes);
 app.use('/api/finance', financeRoutes);
 app.use('/api/payables', payableRoutes);
 app.use('/api/acerto', acertoRoutes);
+app.use('/api/consultas', consultasRoutes);
 app.use('/api/thanks', thanksRoutes);
 
 // Serve arquivo externo para seleção em lote WhatsApp (sempre disponível)
