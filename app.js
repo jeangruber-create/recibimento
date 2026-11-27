@@ -12,8 +12,8 @@ function showVersionBadge() {
 }
 
 // ============ VERSAO DO SISTEMA ============
-const APP_VERSION = '2026-11-25-v29';
-const APP_BUILD = 'despesa-cancelada-auditoria';
+const APP_VERSION = '2026-11-25-v30';
+const APP_BUILD = 'despesas-tela-intuitiva';
 
 // ============ DATA MOCK ============
 const SECTORS = Array.from({length: 20}, (_, i) => ({
@@ -7830,107 +7830,214 @@ function _finPopulatePayableScope(){
   ss.onchange = fillCongs; fillCongs(); ss.dataset.scope = scopeKey;
 }
 
+// Badge único para os dois blocos (em aprovação / aprovadas), com linguagem de leigo.
+function _finBadge(status){
+  var s = String(status || '');
+  if (s === 'paid_by_setor') return '<span class="finance-badge pending">Aguardando validação da sede</span>';
+  if (s === 'paid_by_sede') return '<span class="finance-badge paid">Paga pela sede</span>';
+  if (['paid','quitada'].indexOf(s) >= 0) return '<span class="finance-badge paid">Paga</span>';
+  if (['approved','reviewed','scheduled','confirmado','approved_by_sede'].indexOf(s) >= 0) return '<span class="finance-badge approved">Aprovada</span>';
+  if (s === 'partially_paid') return '<span class="finance-badge approved">Aprovada (parcial)</span>';
+  if (['pending','pending_approval','draft','flagged','preparando'].indexOf(s) >= 0) return '<span class="finance-badge pending">Em aprovação</span>';
+  if (['voided','rejected','canceled'].indexOf(s) >= 0) return '<span class="finance-badge overdue">Cancelada</span>';
+  return '<span class="finance-badge">' + esc(s || '—') + '</span>';
+}
+function _finLocalScope(e){
+  var u = currentUser || {};
+  if (u.role === 'tesoureiro_congregacao') return String(e.congregationId) === String(u.congregationId);
+  if (u.role === 'tesoureiro_setor') return String(e.sectorId) === String(u.sectorId);
+  return true;
+}
+function _finLocalPendingItem(e){
+  return {
+    kind: 'expense', id: e.id, date: e.date,
+    label: (e.category || 'Despesa') + (e.description ? (': ' + e.description) : ''),
+    value: Number(e.value || 0), payment: e.payment || '',
+    status: e.status || 'pending', reviewStatus: e.reviewStatus || 'pending',
+    reviewNote: e.reviewNote || '',
+    sectorId: e.sectorId, congregationId: e.congregationId,
+    meta: { hasProof: !!(e.comprovante && e.comprovante.data) }
+  };
+}
+
 async function renderFinanceControl() {
   if (!canManage(currentUser)) { showToast('Acesso restrito', 'error'); return navigate('screenAdmin'); }
   _finPopulatePayableScope();
   var qstr = _finQS();
+  var extra = qstr ? ('&' + qstr.slice(1)) : '';
   try {
-    var results = await Promise.all([
+    // Cada consulta é independente: se uma falhar, as demais ainda mostram a tela.
+    var results = await Promise.allSettled([
       Api.get('/api/finance/overview' + qstr),
       Api.get('/api/finance/pending' + qstr),
-      Api.get('/api/payables?status=open&limit=200')
+      Api.get('/api/payables?status=open&limit=200' + extra),
+      Api.get('/api/expenses?limit=200' + extra)
     ]);
-    var ov = results[0] || {};
-    var pend = results[1] || {};
-    var payablesRes = results[2] || {};
+    function ok(i){ return results[i] && results[i].status === 'fulfilled' ? results[i].value : null; }
+    var ov = ok(0) || {};
+    var pend = ok(1) || {};
+    var payablesRes = ok(2) || {};
+    var expensesRes = ok(3) || {};
+    var localExpenses = countableExpenses(Storage.getExpenses()).filter(_finLocalScope);
+
+    var pendItems = Array.isArray(pend.items) ? pend.items.slice() : [];
+    if (!ok(1)) {
+      pendItems = localExpenses.filter(function(e){ return !isExpenseApproved(e); }).map(_finLocalPendingItem);
+    }
+    var expenses = Array.isArray(expensesRes.expenses) ? expensesRes.expenses.slice() : [];
+    if (!ok(3)) expenses = localExpenses.slice();
+
     var r = ov.realized || {};
     var p = ov.pending || {};
     var ob = ov.obligations || {};
     var pr = ov.projected || {};
-    if ($('finIncome')) $('finIncome').textContent = _finMoney(r.income);
-    if ($('finExpense')) $('finExpense').textContent = _finMoney(r.expense);
+    var offline = !ok(0);
+    if ($('finIncome')) $('finIncome').textContent = offline ? '—' : _finMoney(r.income);
+    if ($('finExpense')) $('finExpense').textContent = offline ? _finMoney(localExpenses.filter(isExpenseApproved).reduce(function(a,e){ return a + Number(e.value||0); },0)) : _finMoney(r.expense);
     var bal = Number(r.balance || 0);
-    if ($('finBalance')) { $('finBalance').textContent = _finMoney(bal); $('finBalance').style.color = bal < 0 ? 'var(--error)' : ''; }
-    if ($('finObligations')) $('finObligations').textContent = _finMoney(ob.openAmount) + ' (' + (ob.openCount||0) + ')';
+    if ($('finBalance')) { $('finBalance').textContent = offline ? '—' : _finMoney(bal); $('finBalance').style.color = (!offline && bal < 0) ? 'var(--error)' : ''; }
+    if ($('finObligations')) $('finObligations').textContent = offline ? '—' : (_finMoney(ob.openAmount) + ' (' + (ob.openCount||0) + ')');
     var pbal = Number(pr.balance != null ? pr.balance : (bal - Number(ob.openAmount||0)));
-    if ($('finProjected')) { $('finProjected').textContent = _finMoney(pbal); $('finProjected').style.color = pbal < 0 ? 'var(--error)' : ''; }
-    if ($('finPending')) $('finPending').textContent = (Number(p.incomeCount||0) + Number(p.expenseCount||0) + Number(ob.pendingApprovalCount||0)) + ' item(ns)';
-    if ($('financeScopeInfo')) $('financeScopeInfo').textContent = 'Perfil: ' + esc((currentUser&&currentUser.name)||'') + ' (' + esc((currentUser&&currentUser.role)||'') + ') · Atualizado: ' + new Date(ov.generatedAt||Date.now()).toLocaleString('pt-BR');
+    if ($('finProjected')) { $('finProjected').textContent = offline ? '—' : _finMoney(pbal); $('finProjected').style.color = (!offline && pbal < 0) ? 'var(--error)' : ''; }
+    if ($('finPending')) $('finPending').textContent = offline ? (pendItems.length + ' item(ns)') : ((Number(p.incomeCount||0) + Number(p.expenseCount||0) + Number(ob.pendingApprovalCount||0)) + ' item(ns)');
+    if ($('financeScopeInfo')) $('financeScopeInfo').textContent = (offline ? 'Sem conexão — mostrando dados salvos no aparelho. ' : '') + 'Perfil: ' + esc((currentUser&&currentUser.name)||'') + ' (' + esc((currentUser&&currentUser.role)||'') + ') · Atualizado: ' + new Date(ov.generatedAt||Date.now()).toLocaleString('pt-BR');
     if ($('financeBreakdown')) {
-      var ib = r.incomeByPayment || {}; var eb = r.expenseByPayment || {};
-      $('financeBreakdown').innerHTML = 'Entradas pend. confirmação: <strong>' + _finMoney(p.income) + '</strong> (' + (p.incomeCount||0) + ') · Saídas pend. validação: <strong>' + _finMoney(p.expense) + '</strong> (' + (p.expenseCount||0) + ') · Contas vencidas: <strong>' + (ob.overdueCount||0) + '</strong><br>Por forma (realizado) — Entradas: dinheiro ' + _finMoney(ib.dinheiro) + ', pix ' + _finMoney(ib.pix) + ' · Saídas: dinheiro ' + _finMoney(eb.dinheiro) + ', pix ' + _finMoney(eb.pix) + ', outros ' + _finMoney(eb.outros);
+      if (offline) {
+        $('financeBreakdown').textContent = 'Conecte-se para atualizar entradas, saldo e contas da sede.';
+      } else {
+        var ib = r.incomeByPayment || {}; var eb = r.expenseByPayment || {};
+        $('financeBreakdown').innerHTML = 'Entradas a conferir: <strong>' + _finMoney(p.income) + '</strong> (' + (p.incomeCount||0) + ') · Despesas em aprovação: <strong>' + _finMoney(p.expense) + '</strong> (' + (p.expenseCount||0) + ') · Contas vencidas: <strong>' + (ob.overdueCount||0) + '</strong><br>Por forma (realizado) — Entradas: dinheiro ' + _finMoney(ib.dinheiro) + ', pix ' + _finMoney(ib.pix) + ' · Saídas: dinheiro ' + _finMoney(eb.dinheiro) + ', pix ' + _finMoney(eb.pix) + ', outros ' + _finMoney(eb.outros);
+      }
     }
-    renderFinancePendingList((pend && pend.items) || []);
-    renderPayablesList((payablesRes && payablesRes.payables) || []);
+
+    var filter = (($('payFilterStatus')||{}).value || 'all');
+    var approvalItems = pendItems.filter(function(it){ return ['expense','payable','settlement'].indexOf(it.kind) >= 0; });
+    var receiptItems = pendItems.filter(function(it){ return it.kind === 'receipt'; });
+    if (filter === 'approved' || filter === 'paid') approvalItems = [];
+    if ($('financeApprovalCount')) $('financeApprovalCount').textContent = String(approvalItems.length);
+    renderFinancePendingList(approvalItems);
+    renderFinanceReceiptList(receiptItems);
+    renderFinanceApprovedList((payablesRes && payablesRes.payables) || [], expenses, filter);
   } catch (e) {
     console.error('[finance]', e);
-    showToast((e && e.message) ? e.message : 'Falha ao carregar controle financeiro', 'error');
+    showToast((e && e.message) ? e.message : 'Falha ao carregar despesas', 'error');
   }
 }
 
 function renderFinancePendingList(items) {
   var el = $('financePendingList');
   if (!el) return;
-  if (!items || !items.length) { el.innerHTML = '<div style="font-size:13px; color:var(--text-muted);">Nenhum item pendente de validação/aprovação no período/filtro.</div>'; return; }
-  el.innerHTML = items.map(function(it){
-    var kindLabel = it.kind === 'expense' ? 'Despesa' : (it.kind === 'payable' ? 'Conta a pagar' : 'Entrada');
-    var proof = (it.kind === 'expense' && it.meta && it.meta.hasProof) ? ' · <span style="color:var(--success);">com comprovante</span>' : '';
+  var list = (items || []).filter(function(it){ return ['expense','payable','settlement'].indexOf(it.kind) >= 0; });
+  if (!list.length) { el.innerHTML = '<div class="finance-empty">Nada aguardando aprovação. Tudo em dia por aqui.</div>'; return; }
+  el.innerHTML = list.map(function(it){
+    var kindLabel = it.kind === 'expense' ? 'Despesa' : (it.kind === 'payable' ? 'Conta a pagar' : 'Acerto da semana');
+    var proof = (it.kind === 'expense' && it.meta && it.meta.hasProof) ? ' · com comprovante' : '';
     var date = it.date ? new Date(it.date).toLocaleDateString('pt-BR') : '';
-    var note = it.reviewNote ? '<div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Obs: ' + esc(it.reviewNote) + '</div>' : '';
+    var note = it.reviewNote ? '<div class="finance-item-meta">Obs: ' + esc(it.reviewNote) + '</div>' : '';
     var actions = '';
-    if (it.kind === 'expense') {
-      if (currentUser && currentUser.role === 'tesoureiro_congregacao') {
-        actions = '<span style="font-size:12px; color:var(--accent-dark); font-weight:600;">Aguardando aprovação do setor — a congregação não aprova as próprias contas.</span>';
-      } else {
-        actions = '<button type="button" class="btn btn-primary" style="padding:6px 10px; font-size:12px;" onclick="reviewFinanceItem(\'expense\',\'' + esc(it.id) + '\',\'approve\')">Aprovar</button> '
-          + '<button type="button" class="btn btn-outline" style="padding:6px 10px; font-size:12px;" onclick="reviewFinanceItem(\'expense\',\'' + esc(it.id) + '\',\'flag\')">Sinalizar</button> '
-          + '<button type="button" class="btn btn-outline" style="padding:6px 10px; font-size:12px; color:var(--error);" onclick="reviewFinanceItem(\'expense\',\'' + esc(it.id) + '\',\'reject\')">Rejeitar</button>';
-      }
+    if (it.kind === 'expense' && currentUser && currentUser.role === 'tesoureiro_congregacao') {
+      actions = '<div class="finance-item-meta">A congregação não aprova as próprias despesas. Aguardando o setor/sede.</div>';
+    } else if (it.kind === 'expense') {
+      actions = '<button type="button" class="btn btn-primary" onclick="reviewFinanceItem(\'expense\',\'' + esc(it.id) + '\',\'approve\')">Aprovar</button> '
+        + '<button type="button" class="btn btn-outline" onclick="reviewFinanceItem(\'expense\',\'' + esc(it.id) + '\',\'flag\')">Sinalizar</button> '
+        + '<button type="button" class="btn btn-outline" style="color:var(--error);" onclick="reviewFinanceItem(\'expense\',\'' + esc(it.id) + '\',\'reject\')">Rejeitar</button>';
+    } else if (it.kind === 'payable' && currentUser && currentUser.role === 'tesoureiro_congregacao') {
+      actions = '<div class="finance-item-meta">Aguardando aprovação do setor/sede.</div>';
     } else if (it.kind === 'payable') {
-      actions = '<button type="button" class="btn btn-primary" style="padding:6px 10px; font-size:12px;" onclick="payableAction(\'' + esc(it.id) + '\',\'approve\')">Aprovar</button> '
-        + '<button type="button" class="btn btn-outline" style="padding:6px 10px; font-size:12px; color:var(--error);" onclick="payableAction(\'' + esc(it.id) + '\',\'cancel\')">Cancelar</button>';
+      actions = '<button type="button" class="btn btn-primary" onclick="payableAction(\'' + esc(it.id) + '\',\'approve\')">Aprovar</button> '
+        + '<button type="button" class="btn btn-outline" style="color:var(--error);" onclick="payableAction(\'' + esc(it.id) + '\',\'cancel\')">Cancelar</button>';
+    } else if (it.kind === 'settlement' && currentUser && currentUser.role === 'sede') {
+      actions = '<button type="button" class="btn btn-primary" onclick="acertoValidate(\'' + esc(it.id) + '\',\'approved\')">Validar acerto</button> '
+        + '<button type="button" class="btn btn-outline" onclick="acertoValidate(\'' + esc(it.id) + '\',\'flagged\')">Sinalizar</button>';
     } else {
-      actions = '<button type="button" class="btn btn-primary" style="padding:6px 10px; font-size:12px;" onclick="reviewFinanceItem(\'receipt\',\'' + esc(it.id) + '\',\'approve\')">Conferir</button> '
-        + '<button type="button" class="btn btn-outline" style="padding:6px 10px; font-size:12px;" onclick="reviewFinanceItem(\'receipt\',\'' + esc(it.id) + '\',\'flag\')">Sinalizar</button>';
+      actions = '<div class="finance-item-meta">Aguardando validação da sede.</div>';
     }
-    return '<div class="card" style="margin-bottom:8px; padding:12px;"><div><strong>' + esc(kindLabel) + '</strong> · ' + esc(it.label||'') + '<br><span style="font-size:12px; color:var(--text-muted);">' + esc(date) + ' · ' + _finMoney(it.value) + ' · ' + esc(it.payment||'') + ' · status: ' + esc(it.status||'') + proof + '</span>' + note + '</div><div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">' + actions + '</div></div>';
+    return '<div class="finance-item"><div class="finance-item-head"><div><div class="finance-item-title">' + esc(kindLabel) + ' · ' + esc(it.label||'') + '</div>'
+      + '<div class="finance-item-meta">' + esc(date) + ' · ' + _finMoney(it.value) + (it.payment ? (' · ' + esc(it.payment)) : '') + proof + '</div>' + note + '</div>'
+      + _finBadge(it.status || it.reviewStatus) + '</div>'
+      + (actions ? ('<div class="finance-item-actions">' + actions + '</div>') : '') + '</div>';
   }).join('');
 }
 
-function renderPayablesList(items) {
-  var el = $('financePayablesList');
+function renderFinanceReceiptList(items) {
+  var el = $('financeReceiptList');
   if (!el) return;
-  if (!items || !items.length) { el.innerHTML = '<div style="font-size:13px; color:var(--text-muted);">Nenhuma conta a pagar neste filtro.</div>'; return; }
-  var today = new Date(); today.setHours(0,0,0,0);
-  el.innerHTML = items.map(function(p){
-    var due = p.dueDate ? new Date(p.dueDate) : null;
-    var overdue = due && due < today && ['draft','pending_approval','approved','scheduled','partially_paid'].indexOf(p.status) >= 0;
-    var open = Math.max(0, Number(p.amount||0) - Number(p.amountPaid||0));
-    var meta = esc((p.dueDate||'').slice(0,10)) + ' · ' + _finMoney(p.amount) + (Number(p.amountPaid||0)>0 ? (' · pago ' + _finMoney(p.amountPaid)) : '') + ' · ' + esc(p.status||'');
-    if (overdue) meta += ' · <span style="color:var(--error); font-weight:600;">vencida</span>';
-    var actions = '';
-    if (['draft','pending_approval'].indexOf(p.status) >= 0) actions += '<button type="button" class="btn btn-primary" style="padding:6px 10px; font-size:12px;" onclick="payableAction(\''+esc(p.id)+'\',\'approve\')">Aprovar</button> ';
-    if (['approved','scheduled','partially_paid'].indexOf(p.status) >= 0) actions += '<button type="button" class="btn btn-primary" style="padding:6px 10px; font-size:12px;" onclick="payPayable(\''+esc(p.id)+'\','+open+')">Registrar pagamento</button> ';
-    if (['paid','canceled'].indexOf(p.status) < 0) actions += '<button type="button" class="btn btn-outline" style="padding:6px 10px; font-size:12px; color:var(--error);" onclick="payableAction(\''+esc(p.id)+'\',\'cancel\')">Cancelar</button>';
-    return '<div class="card" style="margin-bottom:8px; padding:12px;"><div><strong>'+esc(p.category||'')+'</strong>'+(p.payee?(' · '+esc(p.payee)):'')+'<br><span style="font-size:12px; color:var(--text-muted);">'+meta+'</span>'+(p.description?('<div style="font-size:12px; margin-top:4px;">'+esc(p.description)+'</div>'):'')+'</div><div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">'+actions+'</div></div>';
+  var list = items || [];
+  if (!list.length) { el.innerHTML = '<div class="finance-empty">Nenhuma entrada aguardando conferência.</div>'; return; }
+  el.innerHTML = list.map(function(it){
+    var date = it.date ? new Date(it.date).toLocaleDateString('pt-BR') : '';
+    return '<div class="finance-item"><div class="finance-item-head"><div><div class="finance-item-title">' + esc(it.label||'Entrada') + '</div>'
+      + '<div class="finance-item-meta">' + esc(date) + ' · ' + _finMoney(it.value) + (it.payment ? (' · ' + esc(it.payment)) : '') + '</div></div>'
+      + _finBadge(it.status) + '</div><div class="finance-item-actions">'
+      + '<button type="button" class="btn btn-primary" onclick="reviewFinanceItem(\'receipt\',\'' + esc(it.id) + '\',\'approve\')">Conferir</button> '
+      + '<button type="button" class="btn btn-outline" onclick="reviewFinanceItem(\'receipt\',\'' + esc(it.id) + '\',\'flag\')">Sinalizar</button></div></div>';
   }).join('');
 }
 
-async function renderPayables() {
-  if (!canManage(currentUser)) return;
-  try {
-    var st = (($('payFilterStatus')||{}).value || 'open');
-    var q = st ? ('?status=' + encodeURIComponent(st) + '&limit=200') : '?limit=200';
-    var res = await Api.get('/api/payables' + q);
-    renderPayablesList((res && res.payables) || []);
-  } catch(e){ showToast((e&&e.message)||'Falha ao carregar contas a pagar','error'); }
+function renderFinanceApprovedList(payables, expenses, filter) {
+  var el = $('financeApprovedList');
+  if (!el) return;
+  var show = filter || (($('payFilterStatus')||{}).value || 'all');
+  var rows = [];
+  (payables || []).forEach(function(p){
+    var st = String(p.status || '');
+    if (['approved','scheduled','partially_paid','paid'].indexOf(st) < 0) return;
+    if (show === 'approved' && st === 'paid') return;
+    if (show === 'paid' && st !== 'paid') return;
+    var due = p.dueDate ? new Date(p.dueDate) : null;
+    var today = new Date(); today.setHours(0,0,0,0);
+    var overdue = due && due < today && st !== 'paid';
+    var open = Math.max(0, Number(p.amount||0) - Number(p.amountPaid||0));
+    var actions = '';
+    if (['approved','scheduled','partially_paid'].indexOf(st) >= 0) {
+      actions += '<button type="button" class="btn btn-primary" onclick="payPayable(\'' + esc(p.id) + '\',' + open + ')">Registrar pagamento</button> ';
+      actions += '<button type="button" class="btn btn-outline" style="color:var(--error);" onclick="payableAction(\'' + esc(p.id) + '\',\'cancel\')">Cancelar conta</button>';
+    }
+    rows.push({
+      date: p.dueDate || p.createdAt || '',
+      html: '<div class="finance-item"><div class="finance-item-head"><div>'
+        + '<div class="finance-item-title">' + esc(p.category||'Conta a pagar') + (p.payee ? (' · ' + esc(p.payee)) : '') + '</div>'
+        + '<div class="finance-item-meta">Vencimento ' + esc((p.dueDate||'').slice(0,10)) + ' · ' + _finMoney(p.amount)
+        + (Number(p.amountPaid||0) > 0 ? (' · pago ' + _finMoney(p.amountPaid)) : '')
+        + (overdue ? ' · <span style="color:var(--error);font-weight:700;">vencida</span>' : '')
+        + (p.description ? ('<br>' + esc(p.description)) : '') + '</div></div>'
+        + _finBadge(st) + '</div>' + (actions ? ('<div class="finance-item-actions">' + actions + '</div>') : '') + '</div>'
+    });
+  });
+  (expenses || []).forEach(function(e){
+    var st = expenseReviewState(e);
+    if (['approved','paid'].indexOf(st) < 0 || e.payableId) return;
+    if (show === 'approved' && st === 'paid') return;
+    if (show === 'paid' && st !== 'paid') return;
+    rows.push({
+      date: e.date || createdAtOf(e),
+      html: '<div class="finance-item"><div class="finance-item-head"><div>'
+        + '<div class="finance-item-title">' + esc(e.category||'Despesa') + (e.description ? (' · ' + esc(e.description)) : '') + '</div>'
+        + '<div class="finance-item-meta">' + esc((e.date||'').slice(0,10)) + ' · ' + _finMoney(e.value) + (e.payment ? (' · ' + esc(e.payment)) : '') + '</div></div>'
+        + _finBadge(st) + '</div><div class="finance-item-actions">'
+        + '<button type="button" class="btn btn-outline" style="color:var(--error);" onclick="cancelExpenseItem(\'' + esc(e.id) + '\')">Cancelar despesa</button></div></div>'
+    });
+  });
+  rows.sort(function(a,b){ return String(b.date||'').localeCompare(String(a.date||'')); });
+  if (!rows.length) { el.innerHTML = '<div class="finance-empty">Nenhuma conta aprovada neste filtro.</div>'; return; }
+  el.innerHTML = rows.map(function(x){ return x.html; }).join('');
 }
+function createdAtOf(e){ return (e && (e.createdAt || e.created_at)) || ''; }
+
+// Compatibilidade com chamadas antigas (o filtro agora usa renderFinanceControl).
+function renderPayablesList(items) { renderFinanceApprovedList(items || [], [], 'all'); }
+async function renderPayables() { return renderFinanceControl(); }
 
 function togglePayableForm(){
   var w=$('payableFormWrap'); if(!w) return;
   var show = w.style.display==='none';
   w.style.display = show ? 'block' : 'none';
-  if (show) { var ss=$('paySector'); if(ss) ss.dataset.scope=''; _finPopulatePayableScope(); }
+  if (show) {
+    var ss=$('paySector'); if(ss) ss.dataset.scope='';
+    _finPopulatePayableScope();
+    try { w.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
+    var cat = $('payCategory'); if (cat && typeof cat.focus === 'function') cat.focus();
+  }
 }
 
 async function createPayable(){

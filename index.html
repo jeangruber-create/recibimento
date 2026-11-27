@@ -139,6 +139,48 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
 .module-pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; }
 .module-note { font-size: 13px; color: var(--text-muted); margin-top: 10px; line-height: 1.5; }
 
+/* ===== Tela de despesas: botão novo sempre visível, consultas na lateral ===== */
+/* A rolagem desta tela é a do documento; sem isso o sticky ficaria preso ao .screen. */
+#screenFinanceControl { overflow-y: visible; }
+.finance-bar {
+  position: sticky; top: var(--topbar-h); z-index: 30;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 12px; margin-bottom: 12px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.finance-bar-title { flex: 1 1 150px; min-width: 0; }
+.finance-bar-title span { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted); font-weight: 700; }
+.finance-bar-title strong { display: block; font-size: 16px; line-height: 1.25; }
+.finance-bar-new { flex: 1 1 170px; min-height: 46px; font-size: 16px; font-weight: 700; padding: 10px 14px; }
+.finance-bar-consultas { padding: 10px 12px; white-space: nowrap; }
+.finance-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+.finance-main, .finance-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.finance-side { display: none; }
+.finance-help { font-size: 13px; color: var(--text-muted); margin: 4px 0 10px; line-height: 1.5; }
+.finance-item { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 8px; background: #fff; }
+.finance-item:last-child { margin-bottom: 0; }
+.finance-item-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.finance-item-title { font-weight: 700; font-size: 14px; line-height: 1.35; }
+.finance-item-meta { font-size: 12px; color: var(--text-muted); margin-top: 3px; line-height: 1.5; }
+.finance-item-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.finance-item-actions .btn { flex: 1 1 110px; min-width: 100px; font-size: 13px; padding: 8px 10px; }
+.finance-badge { font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px; white-space: nowrap; background: #eef3f8; color: var(--primary); }
+.finance-badge.pending { background: #fff4d6; color: #8a6100; }
+.finance-badge.approved { background: #e6f5ea; color: var(--success); }
+.finance-badge.paid { background: #eef3f8; color: var(--primary); }
+.finance-badge.overdue { background: #fdeaea; color: var(--error); }
+.finance-empty { font-size: 13px; color: var(--text-muted); padding: 14px; text-align: center; background: var(--bg); border-radius: var(--radius-sm); }
+.finance-period { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.finance-period label { font-size: 12px; color: var(--text-muted); }
+.finance-period .form-input { width: auto; }
+.finance-side-card p { font-size: 13px; color: var(--text-muted); margin: 6px 0 10px; line-height: 1.5; }
+@media (min-width: 840px) {
+  .finance-layout { grid-template-columns: minmax(0, 1fr) 210px; }
+  .finance-side { display: flex; }
+  .finance-bar .finance-bar-consultas { display: none; }
+}
+
 /* ===== Fila de agradecimentos (sede) ===== */
 .thanks-item { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px; background: #fff; }
 .thanks-item-head { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; }
@@ -951,57 +993,115 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
 
   <!-- SCREEN: MEMBROS / CONTATOS (base consolidada, interações e histórico) -->
   
-  <!-- SCREEN: CONTROLE FINANCEIRO GERAL (Fase 1-2) -->
-  <section class="screen" id="screenFinanceControl" data-title="Controle Financeiro">
-    <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
-        <h3 class="card-title" style="margin:0;">Entradas, Saídas e Saldo (quase on-line)</h3>
-        <button type="button" class="btn btn-outline" onclick="renderFinanceControl()" style="padding:8px 12px;">Atualizar</button>
+  <!-- SCREEN: DESPESAS E CONTAS (congregação, setor e sede) -->
+  <section class="screen" id="screenFinanceControl" data-title="Despesas e contas">
+    <!-- Barra fixa: "Nova conta" aparece sempre, em qualquer rolagem da página. -->
+    <div class="finance-bar">
+      <div class="finance-bar-title">
+        <span>Despesas e contas</span>
+        <strong>Lançar, aprovar e pagar</strong>
       </div>
-      <div id="financeScopeInfo" style="font-size:13px; color:var(--text-muted); margin-bottom:10px;">—</div>
-      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
-        <label style="font-size:12px; color:var(--text-muted);">De <input type="date" class="form-input" id="finFrom" style="display:inline-block; width:auto; padding:8px;"></label>
-        <label style="font-size:12px; color:var(--text-muted);">Até <input type="date" class="form-input" id="finTo" style="display:inline-block; width:auto; padding:8px;"></label>
-        <button type="button" class="btn btn-primary" onclick="renderFinanceControl()" style="padding:8px 14px;">Aplicar</button>
-      </div>
-      <div class="confirm-grid" id="financeKpis">
-        <div class="confirm-item"><div class="confirm-label">Entradas (realizadas)</div><div class="confirm-value" id="finIncome">—</div></div>
-        <div class="confirm-item"><div class="confirm-label">Saídas (realizadas)</div><div class="confirm-value" id="finExpense">—</div></div>
-        <div class="confirm-item"><div class="confirm-label">Saldo realizado</div><div class="confirm-value" id="finBalance">—</div></div>
-        <div class="confirm-item"><div class="confirm-label">A pagar (aberto)</div><div class="confirm-value" id="finObligations">—</div></div>
-        <div class="confirm-item"><div class="confirm-label">Saldo projetado</div><div class="confirm-value" id="finProjected">—</div></div>
-        <div class="confirm-item"><div class="confirm-label">Pendências</div><div class="confirm-value" id="finPending">—</div></div>
-      </div>
-      <div id="financeBreakdown" style="font-size:12px; color:var(--text-muted); margin-top:10px;"></div>
+      <button type="button" class="btn btn-outline finance-bar-consultas" onclick="navigate('screenConsultas')">Consultas</button>
+      <button type="button" class="btn btn-primary finance-bar-new" onclick="togglePayableForm()">+ Nova conta</button>
     </div>
-    <div class="card">
-      <h3 class="card-title">Fila de validação / aprovações</h3>
-      <div style="font-size:13px; color:var(--text-muted); margin-bottom:10px;">Valide lançamentos e aprove contas a pagar. Ao registrar pagamento de uma conta aprovada, o sistema gera a saída realizada automaticamente.</div>
-      <div id="financePendingList"></div>
-    </div>
-    <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
-        <h3 class="card-title" style="margin:0;">Contas a pagar (despesas futuras)</h3>
-        <button type="button" class="btn btn-primary" onclick="togglePayableForm()" style="padding:8px 12px;">Nova conta</button>
-      </div>
-      <div id="payableFormWrap" style="display:none; margin-bottom:12px; padding:10px; border:1px solid var(--border, #e5e7eb); border-radius:8px;">
-        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px;">
-          <input class="form-input" id="payCategory" placeholder="Categoria/natureza (ex.: Aluguel)">
-          <input class="form-input" id="payPayee" placeholder="Favorecido/fornecedor">
-          <input class="form-input" id="payAmount" type="number" step="0.01" min="0" placeholder="Valor (R$)">
-          <input class="form-input" id="payDue" type="date" placeholder="Vencimento">
-          <select class="form-input" id="payPayment"><option value="pix">PIX</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="outros">Outros</option></select>
-          <select class="form-input" id="paySector"></select>
-          <select class="form-input" id="payCong"></select>
+
+    <div class="finance-layout">
+      <div class="finance-main">
+        <!-- Formulário abre logo abaixo do botão, antes de qualquer lista. -->
+        <div id="payableFormWrap" class="card finance-form" style="display:none;">
+          <div class="card-title-row">
+            <h3 class="card-title" style="margin:0;">Nova conta a pagar</h3>
+            <button type="button" class="btn btn-outline" onclick="togglePayableForm()" style="padding:8px 12px;">Fechar</button>
+          </div>
+          <p class="finance-help">Preencha os dados. A conta fica <strong>aguardando aprovação</strong> do setor ou da sede.</p>
+          <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px;">
+            <input class="form-input" id="payCategory" placeholder="Categoria (ex.: Aluguel, Energia)">
+            <input class="form-input" id="payPayee" placeholder="Favorecido / fornecedor">
+            <input class="form-input" id="payAmount" type="number" step="0.01" min="0" placeholder="Valor (R$)">
+            <input class="form-input" id="payDue" type="date" placeholder="Vencimento">
+            <select class="form-input" id="payPayment"><option value="pix">PIX</option><option value="dinheiro">Dinheiro</option><option value="cartao">Cartão</option><option value="outros">Outros</option></select>
+            <select class="form-input" id="paySector"></select>
+            <select class="form-input" id="payCong"></select>
+          </div>
+          <input class="form-input" id="payDesc" placeholder="Descrição / observação (opcional)" style="margin-top:8px;">
+          <div style="display:flex; gap:8px; margin-top:8px;"><button type="button" class="btn btn-primary" onclick="createPayable()">Salvar conta</button><button type="button" class="btn btn-outline" onclick="togglePayableForm()">Cancelar</button></div>
         </div>
-        <input class="form-input" id="payDesc" placeholder="Descrição/observação" style="margin-top:8px;">
-        <div style="display:flex; gap:8px; margin-top:8px;"><button type="button" class="btn btn-primary" onclick="createPayable()">Salvar (aguarda aprovação)</button><button type="button" class="btn btn-outline" onclick="togglePayableForm()">Cancelar</button></div>
+
+        <div class="card finance-guide">
+          <h3 class="card-title">Como funciona</h3>
+          <div class="module-steps">
+            <div class="module-step"><span class="module-step-num">1</span><span><strong>Você lança</strong> a conta com o valor e o vencimento.</span></div>
+            <div class="module-step"><span class="module-step-num">2</span><span><strong>Setor ou sede aprova</strong> antes do pagamento.</span></div>
+            <div class="module-step"><span class="module-step-num">3</span><span><strong>Registre o pagamento</strong> com comprovante. A saída é contada automaticamente.</span></div>
+          </div>
+        </div>
+
+        <div class="card finance-block" id="financeApprovalCard" style="border-left:4px solid var(--accent);">
+          <div class="card-title-row">
+            <h3 class="card-title" style="margin:0;">Em aprovação</h3>
+            <span id="financeApprovalCount" class="module-pill" style="background:#fff4d6; color:#8a6100;">0</span>
+          </div>
+          <p class="finance-help">Despesas e contas lançadas que ainda aguardam a aprovação.</p>
+          <div id="financePendingList"></div>
+        </div>
+
+        <div class="card finance-block" style="border-left:4px solid var(--success);">
+          <div class="card-title-row">
+            <h3 class="card-title" style="margin:0;">Aprovadas</h3>
+            <select class="form-input" id="payFilterStatus" style="width:auto; padding:8px;" onchange="renderFinanceControl()">
+              <option value="all">Todas</option>
+              <option value="approved">Prontas para pagar</option>
+              <option value="paid">Pagas</option>
+            </select>
+          </div>
+          <p class="finance-help">Contas liberadas para pagar. A congregação acompanha; setor e sede registram o pagamento.</p>
+          <div id="financeApprovedList"></div>
+        </div>
+
+        <div class="card" id="financeReceiptCard">
+          <div class="card-title-row">
+            <h3 class="card-title" style="margin:0;">Entradas para conferir</h3>
+            <button type="button" class="btn btn-outline" onclick="renderFinanceControl()" style="padding:8px 12px;">Atualizar</button>
+          </div>
+          <p class="finance-help">Dízimos e ofertas que ainda precisam ser conferidos.</p>
+          <div id="financeReceiptList"></div>
+        </div>
+
+        <div class="card finance-summary">
+          <div class="card-title-row">
+            <h3 class="card-title" style="margin:0;">Resumo do período</h3>
+            <button type="button" class="btn btn-outline" onclick="renderFinanceControl()" style="padding:8px 12px;">Atualizar</button>
+          </div>
+          <div id="financeScopeInfo" style="font-size:13px; color:var(--text-muted); margin-bottom:10px;">—</div>
+          <div class="finance-period">
+            <label>De <input type="date" class="form-input" id="finFrom" style="display:inline-block; width:auto; padding:8px;"></label>
+            <label>Até <input type="date" class="form-input" id="finTo" style="display:inline-block; width:auto; padding:8px;"></label>
+            <button type="button" class="btn btn-primary" onclick="renderFinanceControl()" style="padding:8px 14px;">Aplicar</button>
+          </div>
+          <div class="confirm-grid" id="financeKpis" style="margin-top:12px;">
+            <div class="confirm-item"><div class="confirm-label">Entradas</div><div class="confirm-value" id="finIncome">—</div></div>
+            <div class="confirm-item"><div class="confirm-label">Saídas</div><div class="confirm-value" id="finExpense">—</div></div>
+            <div class="confirm-item"><div class="confirm-label">Saldo</div><div class="confirm-value" id="finBalance">—</div></div>
+            <div class="confirm-item"><div class="confirm-label">A pagar</div><div class="confirm-value" id="finObligations">—</div></div>
+            <div class="confirm-item"><div class="confirm-label">Saldo projetado</div><div class="confirm-value" id="finProjected">—</div></div>
+            <div class="confirm-item"><div class="confirm-label">Pendências</div><div class="confirm-value" id="finPending">—</div></div>
+          </div>
+          <div id="financeBreakdown" style="font-size:12px; color:var(--text-muted); margin-top:10px;"></div>
+        </div>
       </div>
-      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
-        <select class="form-input" id="payFilterStatus" style="width:auto;" onchange="renderPayables()"><option value="open">Em aberto</option><option value="overdue">Vencidas</option><option value="pending_approval">Aguardando aprovação</option><option value="paid">Pagas</option><option value="">Todas</option></select>
-        <button type="button" class="btn btn-outline" onclick="renderPayables()" style="padding:8px 12px;">Atualizar</button>
-      </div>
-      <div id="financePayablesList"></div>
+
+      <!-- Consultas na lateral (desktop); no celular o botão fica na barra fixa. -->
+      <aside class="finance-side">
+        <div class="card finance-side-card">
+          <h3 class="card-title" style="font-size:15px;">Consultas</h3>
+          <p>Encontre entradas, saídas e contas antigas por data, congregação e situação.</p>
+          <button type="button" class="btn btn-outline" onclick="navigate('screenConsultas')" style="padding:8px 12px;">Abrir consultas</button>
+        </div>
+        <div class="card finance-side-card">
+          <h3 class="card-title" style="font-size:15px;">Atenção</h3>
+          <p>A congregação não aprova as próprias contas. A aprovação é do setor ou da sede.</p>
+        </div>
+      </aside>
     </div>
     <div id="payablePayModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:1200; padding:16px; overflow:auto;">
       <div class="card" style="max-width:520px; margin:40px auto;">
@@ -1601,7 +1701,7 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Sego
   <div class="toast" id="toast"></div>
 </div>
 
-<script src="app.js?v=37"></script>
+<script src="app.js?v=38"></script>
 
 
 <script src="mbw.js?v=12"></script>
